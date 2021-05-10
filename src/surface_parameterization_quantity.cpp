@@ -171,7 +171,7 @@ void SurfaceParameterizationQuantity::buildCustomUI() {
   // Choose viz style
   if (ImGui::BeginCombo("style", styleName(getStyle()).c_str())) {
     for (ParamVizStyle s :
-         {ParamVizStyle::CHECKER, ParamVizStyle::GRID, ParamVizStyle::LOCAL_CHECK, ParamVizStyle::LOCAL_RAD, ParamVizStyle::COLOR_CHECKER}) {
+         {ParamVizStyle::COLOR_CHECKER, ParamVizStyle::CHECKER, ParamVizStyle::GRID, ParamVizStyle::LOCAL_CHECK, ParamVizStyle::LOCAL_RAD}) {
       if (ImGui::Selectable(styleName(s).c_str(), s == getStyle())) {
         setStyle(s);
       }
