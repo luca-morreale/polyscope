@@ -11,7 +11,7 @@ const ShaderReplacementRule GLSL_VERSION(
     /* rule name */ "GLSL_VERSION",
     /* replacement sources */
     {
-        {"GLSL_VERSION", "#version 330 core"}, 
+        {"GLSL_VERSION", "#version 330 core"},
     }
 );
 
@@ -20,7 +20,7 @@ const ShaderReplacementRule GLOBAL_FRAGMENT_FILTER(
     /* rule name */ "GLOBAL_FRAGMENT_FILTER",
     /* replacement sources */
     {
-        {"GLOBAL_FRAGMENT_FILTER", "// do nothing, for now"}, 
+        {"GLOBAL_FRAGMENT_FILTER", "// do nothing, for now"},
     }
 );
 
@@ -52,7 +52,7 @@ const ShaderReplacementRule LIGHT_MATCAP (
     }
 );
 
-// "light" by just copying the value 
+// "light" by just copying the value
 // input: vec3 albedoColor;
 // output: vec3 litColor after lighting
 const ShaderReplacementRule LIGHT_PASSTHRU (
@@ -83,7 +83,7 @@ const ShaderReplacementRule SHADE_BASECOLOR (
     /* textures */ {}
 );
 
-// input: vec3 shadeColor 
+// input: vec3 shadeColor
 // output: vec3 albedoColor
 const ShaderReplacementRule SHADE_COLOR(
     /* rule name */ "SHADE_COLOR",
@@ -269,6 +269,48 @@ const ShaderReplacementRule CHECKER_VALUE2COLOR (
     /* textures */ {}
 );
 
+// input shadeValue2
+//output albedoColor
+const ShaderReplacementRule PARAM_TEXT2COLOR (
+    /* rule name */ "PARAM_TEXT2COLOR",
+    { /* replacement sources */
+      {"FRAG_DECLARATIONS", R"(
+          uniform float u_modLen;
+          uniform float u_angle;
+          uniform bool u_flip;
+          uniform bool v_flip;
+          uniform sampler2D t_image;
+        )"},
+      {"GENERATE_SHADE_COLOR", R"(
+
+        float sin_factor = sin(u_angle);
+        float cos_factor = cos(u_angle);
+
+        if(u_flip) {
+          shadeValue2.x = -shadeValue2.x;
+        }
+        if(v_flip) {
+          shadeValue2.y = -shadeValue2.y;
+        }
+
+        shadeValue2 = shadeValue2 * mat2(cos_factor, -sin_factor, sin_factor, cos_factor);
+        shadeValue2 = shadeValue2 * u_modLen;
+
+        vec3 albedoColor = texture(t_image, shadeValue2).rgb;
+
+      )"}
+    },
+    /* uniforms */ {
+        {"u_modLen", DataType::Float},
+        {"u_angle", DataType::Float},
+        {"u_flip", DataType::Int},
+        {"v_flip", DataType::Int},
+    },
+    /* attributes */ {},
+    /* textures */ { {"t_image", 2} }
+);
+
+
 
 const ShaderReplacementRule GENERATE_WORLD_POS (
     /* rule name */ "GENERATE_WORLD_POS",
@@ -320,6 +362,7 @@ const ShaderReplacementRule CULL_POS_FROM_ATTR (
     /* textures */ {}
 );
 
+
 ShaderReplacementRule generateSlicePlaneRule(std::string uniquePostfix) {
 
   std::string centerUniformName = "u_slicePlaneCenter_" + uniquePostfix;
@@ -330,7 +373,7 @@ ShaderReplacementRule generateSlicePlaneRule(std::string uniquePostfix) {
       /* rule name */ "SLICE_PLANE_CULL_" + uniquePostfix,
       { /* replacement sources */
         {"FRAG_DECLARATIONS", "uniform vec3 " + centerUniformName + "; uniform vec3 " + normalUniformName + ";"},
-        {"GLOBAL_FRAGMENT_FILTER", 
+        {"GLOBAL_FRAGMENT_FILTER",
          "if(dot(cullPos, " + normalUniformName + ") < dot( " + centerUniformName + " , " + normalUniformName + ")) { discard; }"}
       },
       /* uniforms */ {
@@ -343,6 +386,7 @@ ShaderReplacementRule generateSlicePlaneRule(std::string uniquePostfix) {
 
   return slicePlaneRule;
 }
+
 
 // clang-format on
 
