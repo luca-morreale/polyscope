@@ -60,11 +60,12 @@ public:
   // Darkness for checkers (etc)
   SurfaceParameterizationQuantity* setAltDarkness(double newVal);
   double getAltDarkness();
-    
+
 
 protected:
   // === Visualiztion options
   PersistentValue<float> checkerSize;
+  PersistentValue<float> textScale;
   PersistentValue<ParamVizStyle> vizStyle;
   PersistentValue<glm::vec3> checkColor1, checkColor2;           // for checker (two colors to use)
   PersistentValue<glm::vec3> gridLineColor, gridBackgroundColor; // for GRID (two colors to use)
@@ -73,6 +74,8 @@ protected:
   PersistentValue<std::string> cMap;
   float localRot = 0.; // for LOCAL (angular shift, in radians)
   std::shared_ptr<render::ShaderProgram> program;
+  bool flip_uv_u = false;
+  bool flip_uv_v = true;
 
   // Helpers
   void createProgram();

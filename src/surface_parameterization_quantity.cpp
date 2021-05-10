@@ -5,7 +5,7 @@
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
 
-#include "polyscope/render/shaders.h"
+// #include "polyscope/render/shaders.h"
 #include "polyscope/render/material_defs.h"
 
 #include "imgui.h"
@@ -23,6 +23,7 @@ namespace polyscope {
 SurfaceParameterizationQuantity::SurfaceParameterizationQuantity(std::string name, ParamCoordsType type_,
                                                                  ParamVizStyle style_, SurfaceMesh& mesh_)
     : SurfaceMeshQuantity(name, mesh_, true), coordsType(type_), checkerSize(uniquePrefix() + "#checkerSize", 0.02),
+      textScale(uniquePrefix() + "#textScale", 1.0),
       vizStyle(uniquePrefix() + "#vizStyle", style_), checkColor1(uniquePrefix() + "#checkColor1", render::RGB_PINK),
       checkColor2(uniquePrefix() + "#checkColor2", glm::vec3(.976, .856, .885)),
       gridLineColor(uniquePrefix() + "#gridLineColor", render::RGB_WHITE),
@@ -84,12 +85,10 @@ void SurfaceParameterizationQuantity::createProgram() {
                                   render::bindata_colorchecker.size(), &w, &h, &comp, STBI_rgb);
     if (image == nullptr) throw std::logic_error("Failed to load texture image");
 
-    program = render::engine->generateShaderProgram(
-        {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_CHECKER_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
-    // program =
-    //     render::engine->generateShaderProgram("GROUND_PLANE_TILE_REFLECT", DrawMode::Triangles);
+    program = render::engine->requestShader(
+          "MESH", parent.addStructureRules({"MESH_PROPAGATE_VALUE2", "PARAM_TEXT2COLOR"}));
 
-    program->setTexture2D("t_ground", image, w, h, false, false, true);
+    program->setTexture2D("t_image", image, w, h, false, false, true);
     stbi_image_free(image);
 
     break;
@@ -131,8 +130,10 @@ void SurfaceParameterizationQuantity::setProgramUniforms(render::ShaderProgram& 
     program.setUniform("u_modDarkness", getAltDarkness());
     break;
   case ParamVizStyle::COLOR_CHECKER:
-    program.setUniform("u_color1", getCheckerColors().first);
-    program.setUniform("u_color2", getCheckerColors().second);
+    program.setUniform("u_modLen", textScale.get());
+    program.setUniform("u_angle", localRot);
+    program.setUniform("u_flip", (int)flip_uv_u);
+    program.setUniform("v_flip", (int)flip_uv_v);
     break;
   }
 }
@@ -179,9 +180,16 @@ void SurfaceParameterizationQuantity::buildCustomUI() {
   }
 
 
-  // Modulo stripey width
-  if (ImGui::DragFloat("period", &checkerSize.get(), .001, 0.0001, 1.0, "%.4f", 2.0)) {
-    setCheckerSize(getCheckerSize());
+  if (getStyle() != ParamVizStyle::COLOR_CHECKER) {
+    // Modulo stripey width
+    if (ImGui::DragFloat("period", &checkerSize.get(), .001, 0.0001, 1.0, "%.4f", 2.0)) {
+      setCheckerSize(getCheckerSize());
+    }
+  } else {
+    // Modulo stripey width
+    if (ImGui::DragFloat("scale", &textScale.get(), .01, 0.0001, 5.0, "%.4f", 1.0)) {
+      setCheckerSize(getCheckerSize());
+    }
   }
 
 
@@ -221,11 +229,10 @@ void SurfaceParameterizationQuantity::buildCustomUI() {
 
     break;
   case ParamVizStyle::COLOR_CHECKER:
-    if (ImGui::ColorEdit3("##colors2", &checkColor1.get()[0], ImGuiColorEditFlags_NoInputs))
-      setCheckerColors(getCheckerColors());
+    ImGui::SliderAngle("angle shift", &localRot, -180, 180); // displays in degrees, works in radians TODO refresh/update/persist
+    ImGui::Checkbox("Flip u", &flip_uv_u);
     ImGui::SameLine();
-    if (ImGui::ColorEdit3("colors", &checkColor2.get()[0], ImGuiColorEditFlags_NoInputs))
-      setCheckerColors(getCheckerColors());
+    ImGui::Checkbox("Flip v", &flip_uv_v);
     break;
   }
 }
