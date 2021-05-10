@@ -5,8 +5,10 @@
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
 #include "polyscope/render/shaders.h"
+#include "polyscope/render/material_defs.h"
 
 #include "imgui.h"
+#include "stb_image.h"
 
 using std::cout;
 using std::endl;
@@ -64,6 +66,22 @@ void SurfaceParameterizationQuantity::createProgram() {
         {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_LOCAL_RAD_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
     program->setTextureFromColormap("t_colormap", cMap.get());
     break;
+  case ParamVizStyle::COLOR_CHECKER:
+    int w, h, comp;
+    unsigned char* image = nullptr;
+    image = stbi_load_from_memory(reinterpret_cast<const unsigned char*>(&render::bindata_colorchecker[0]),
+                                  render::bindata_colorchecker.size(), &w, &h, &comp, STBI_rgb);
+    if (image == nullptr) throw std::logic_error("Failed to load texture image");
+
+    program = render::engine->generateShaderProgram(
+        {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_CHECKER_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    // program =
+    //     render::engine->generateShaderProgram("GROUND_PLANE_TILE_REFLECT", DrawMode::Triangles);
+
+    program->setTexture2D("t_ground", image, w, h, false, false, true);
+    stbi_image_free(image);
+
+    break;
   }
 
   // Fill color buffers
@@ -100,6 +118,10 @@ void SurfaceParameterizationQuantity::setProgramUniforms(render::ShaderProgram& 
   case ParamVizStyle::LOCAL_RAD:
     program.setUniform("u_angle", localRot);
     break;
+  case ParamVizStyle::COLOR_CHECKER:
+    program.setUniform("u_color1", getCheckerColors().first);
+    program.setUniform("u_color2", getCheckerColors().second);
+    break;
   }
 }
 
@@ -119,6 +141,9 @@ std::string styleName(ParamVizStyle v) {
   case ParamVizStyle::LOCAL_RAD:
     return "local dist";
     break;
+  case ParamVizStyle::COLOR_CHECKER:
+    return "color checker";
+    break;
   }
   throw std::runtime_error("broken");
 }
@@ -133,7 +158,7 @@ void SurfaceParameterizationQuantity::buildCustomUI() {
   // Choose viz style
   if (ImGui::BeginCombo("style", styleName(getStyle()).c_str())) {
     for (ParamVizStyle s :
-         {ParamVizStyle::CHECKER, ParamVizStyle::GRID, ParamVizStyle::LOCAL_CHECK, ParamVizStyle::LOCAL_RAD}) {
+         {ParamVizStyle::CHECKER, ParamVizStyle::GRID, ParamVizStyle::LOCAL_CHECK, ParamVizStyle::LOCAL_RAD, ParamVizStyle::COLOR_CHECKER}) {
       if (ImGui::Selectable(styleName(s).c_str(), s == getStyle())) {
         setStyle(s);
       }
@@ -178,7 +203,14 @@ void SurfaceParameterizationQuantity::buildCustomUI() {
     }
   }
 
-  break;
+    break;
+  case ParamVizStyle::COLOR_CHECKER:
+    if (ImGui::ColorEdit3("##colors2", &checkColor1.get()[0], ImGuiColorEditFlags_NoInputs))
+      setCheckerColors(getCheckerColors());
+    ImGui::SameLine();
+    if (ImGui::ColorEdit3("colors", &checkColor2.get()[0], ImGuiColorEditFlags_NoInputs))
+      setCheckerColors(getCheckerColors());
+    break;
   }
 }
 
