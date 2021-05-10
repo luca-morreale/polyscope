@@ -414,18 +414,18 @@ void buildPolyscopeGui() {
 
     // clang-format off
 		ImGui::Begin("Controls", NULL, ImGuiWindowFlags_NoTitleBar);
-		ImGui::TextUnformatted("View Navigation:");			
+		ImGui::TextUnformatted("View Navigation:");
 			ImGui::TextUnformatted("      Rotate: [left click drag]");
 			ImGui::TextUnformatted("   Translate: [shift] + [left click drag] OR [right click drag]");
 			ImGui::TextUnformatted("        Zoom: [scroll] OR [ctrl] + [shift] + [left click drag]");
 			ImGui::TextUnformatted("   Use [ctrl-c] and [ctrl-v] to save and restore camera poses");
 			ImGui::TextUnformatted("     via the clipboard.");
-		ImGui::TextUnformatted("\nMenu Navigation:");			
+		ImGui::TextUnformatted("\nMenu Navigation:");
 			ImGui::TextUnformatted("   Menu headers with a '>' can be clicked to collapse and expand.");
 			ImGui::TextUnformatted("   Use [ctrl] + [left click] to manually enter any numeric value");
 			ImGui::TextUnformatted("     via the keyboard.");
 			ImGui::TextUnformatted("   Press [space] to dismiss popup dialogs.");
-		ImGui::TextUnformatted("\nSelection:");			
+		ImGui::TextUnformatted("\nSelection:");
 			ImGui::TextUnformatted("   Select elements of a structure with [left click]. Data from");
 			ImGui::TextUnformatted("     that element will be shown on the right. Use [right click]");
 			ImGui::TextUnformatted("     to clear the selection.");
@@ -839,7 +839,7 @@ void removeAllStructures() {
 
 void updateStructureExtents() {
   // Compute length scale and bbox as the max of all structures
-  state::lengthScale = 0.0;
+  // state::lengthScale = 0.0; // commented to avoid change of camera position
   glm::vec3 minBbox = glm::vec3{1, 1, 1} * std::numeric_limits<float>::infinity();
   glm::vec3 maxBbox = -glm::vec3{1, 1, 1} * std::numeric_limits<float>::infinity();
 
@@ -856,8 +856,9 @@ void updateStructureExtents() {
     minBbox = -glm::vec3{1, 1, 1};
     maxBbox = glm::vec3{1, 1, 1};
   }
-  std::get<0>(state::boundingBox) = minBbox;
-  std::get<1>(state::boundingBox) = maxBbox;
+
+  // std::get<0>(state::boundingBox) = minBbox; // commented to avoid change of camera position
+  // std::get<1>(state::boundingBox) = maxBbox; // commented to avoid change of camera position
 
   // If we got a bounding box but not a length scale we can use the size of the
   // box as a scale. If we got neither, we'll end up with a constant near 1 due
@@ -867,7 +868,8 @@ void updateStructureExtents() {
   }
 
   // Center is center of bounding box
-  state::center = 0.5f * (minBbox + maxBbox);
+  // state::center = 0.5f * (minBbox + maxBbox); // commented to avoid change of camera position
+
 }
 
 
