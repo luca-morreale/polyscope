@@ -931,10 +931,10 @@ long long int SurfaceMesh::selectVertex() {
       }
     }
   };
-  
+
   // Pass control to the context we just created
   pushContext(focusedPopupUI);
-  
+
   setEdgeWidth(oldEdgeWidth); // restore edge setting
 
   return returnVertInd;
@@ -1116,7 +1116,7 @@ SurfaceCornerParameterizationQuantity*
 SurfaceMesh::addParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& coords,
                                              ParamCoordsType type) {
   SurfaceCornerParameterizationQuantity* q = new SurfaceCornerParameterizationQuantity(
-      name, applyPermutation(coords, cornerPerm), type, ParamVizStyle::CHECKER, *this);
+      name, applyPermutation(coords, cornerPerm), type, ParamVizStyle::COLOR_CHECKER, *this);
   addQuantity(q);
 
   return q;
@@ -1126,7 +1126,7 @@ SurfaceVertexParameterizationQuantity*
 SurfaceMesh::addVertexParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& coords,
                                                    ParamCoordsType type) {
   SurfaceVertexParameterizationQuantity* q = new SurfaceVertexParameterizationQuantity(
-      name, applyPermutation(coords, vertexPerm), type, ParamVizStyle::CHECKER, *this);
+      name, applyPermutation(coords, vertexPerm), type, ParamVizStyle::COLOR_CHECKER, *this);
   addQuantity(q);
 
   return q;
