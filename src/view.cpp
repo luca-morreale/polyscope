@@ -2,6 +2,7 @@
 #include "polyscope/view.h"
 
 #include "polyscope/polyscope.h"
+#include "polyscope/utilities.h"
 
 #include "imgui.h"
 
@@ -345,6 +346,19 @@ void getCameraFrame(glm::vec3& lookDir, glm::vec3& upDir, glm::vec3& rightDir) {
   rightDir = Rt * glm::vec3(1.0, 0.0, 0.0);
 }
 
+glm::vec3 screenCoordsToWorldRay(glm::vec2 screenCoords) {
+
+  glm::mat4 view = getCameraViewMatrix();
+  glm::mat4 proj = getCameraPerspectiveMatrix();
+  glm::vec4 viewport = {0., 0., view::windowWidth, view::windowHeight};
+
+  glm::vec3 screenPos3{screenCoords.x, view::windowHeight - screenCoords.y, 0.};
+  glm::vec3 worldPos = glm::unProject(screenPos3, view, proj, viewport);
+  glm::vec3 worldRayDir = glm::normalize(glm::vec3(worldPos) - getCameraWorldPosition());
+
+  return worldRayDir;
+}
+
 void startFlightTo(const CameraParameters& p, float flightLengthInSeconds) {
   // startFlightTo(p.E, glm::degrees(2 * std::atan(1. / (2. * p.focalLengths.y))),
   //               flightLengthInSeconds);
@@ -401,27 +415,6 @@ void updateFlight() {
     }
     requestRedraw(); // flight is still happening, draw again next frame
   }
-}
-
-void splitTransform(const glm::mat4& trans, glm::mat3x4& R, glm::vec3& T) {
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < 4; j++) {
-      R[i][j] = trans[i][j];
-    }
-    T[i] = trans[3][i];
-  }
-}
-
-glm::mat4 buildTransform(const glm::mat3x4& R, const glm::vec3& T) {
-  glm::mat4 trans(1.0);
-  for (int i = 0; i < 3; i++) {
-    for (int j = 0; j < 4; j++) {
-      trans[i][j] = R[i][j];
-    }
-    trans[3][i] = T[i];
-  }
-
-  return trans;
 }
 
 std::string getCameraJson() {
@@ -598,33 +591,40 @@ void buildViewGui() {
     ImGui::SameLine();
     ImGui::Text("Up Direction");
 
-    // Field of view
-    float fovF = fov;
-    if (ImGui::SliderFloat(" Field of View", &fovF, 5.0, 160.0, "%.2f deg")) {
-      fov = fovF;
-      requestRedraw();
-    };
+    ImGui::SetNextTreeNodeOpen(false, ImGuiCond_FirstUseEver);
+    if (ImGui::TreeNode("Camera Parameters")) {
 
-    // Clip planes
-    float nearClipRatioF = nearClipRatio;
-    float farClipRatioF = farClipRatio;
-    if (ImGui::SliderFloat(" Clip Near", &nearClipRatioF, 0., 10., "%.5f", 3.)) {
-      nearClipRatio = nearClipRatioF;
-      requestRedraw();
-    }
-    if (ImGui::SliderFloat(" Clip Far", &farClipRatioF, 1., 1000., "%.2f", 3.)) {
-      farClipRatio = farClipRatioF;
-      requestRedraw();
+      // Field of view
+      float fovF = fov;
+      if (ImGui::SliderFloat(" Field of View", &fovF, 5.0, 160.0, "%.2f deg")) {
+        fov = fovF;
+        requestRedraw();
+      };
+
+      // Clip planes
+      float nearClipRatioF = nearClipRatio;
+      float farClipRatioF = farClipRatio;
+      if (ImGui::SliderFloat(" Clip Near", &nearClipRatioF, 0., 10., "%.5f", 3.)) {
+        nearClipRatio = nearClipRatioF;
+        requestRedraw();
+      }
+      if (ImGui::SliderFloat(" Clip Far", &farClipRatioF, 1., 1000., "%.2f", 3.)) {
+        farClipRatio = farClipRatioF;
+        requestRedraw();
+      }
+
+      // Move speed
+      float moveScaleF = view::moveScale;
+      ImGui::SliderFloat(" Move Speed", &moveScaleF, 0.0, 1.0, "%.5f", 3.);
+      view::moveScale = moveScaleF;
+
+      ImGui::TreePop();
     }
 
-    // Move speed
-    float moveScaleF = view::moveScale;
-    ImGui::SliderFloat(" Move Speed", &moveScaleF, 0.0, 1.0, "%.5f", 3.);
-    view::moveScale = moveScaleF;
+
+    buildSlicePlaneGUI();
 
     ImGui::PopItemWidth();
-
-
     ImGui::TreePop();
   }
 }

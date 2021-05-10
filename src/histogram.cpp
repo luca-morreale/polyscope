@@ -3,7 +3,6 @@
 
 #include "polyscope/affine_remapper.h"
 #include "polyscope/polyscope.h"
-#include "polyscope/render/shaders.h"
 
 #include "imgui.h"
 
@@ -14,6 +13,8 @@ using std::cout;
 using std::endl;
 
 namespace polyscope {
+
+// TODO make histograms lazy. There's no need to prepare here rather than on first draw.
 
 Histogram::Histogram() {
   prepare();
@@ -235,8 +236,7 @@ void Histogram::prepare() {
   framebuffer->addColorBuffer(texturebuffer);
 
   // Create the program
-  program = render::engine->generateShaderProgram({render::HISTOGRAM_VERT_SHADER, render::HISTOGRAM_FRAG_SHADER},
-                                                  DrawMode::Triangles);
+  program = render::engine->requestShader("HISTOGRAM", {}, render::ShaderReplacementDefaults::Process);
 
   prepared = true;
 }

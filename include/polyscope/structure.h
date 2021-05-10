@@ -4,6 +4,7 @@
 #include "polyscope/persistent_value.h"
 #include "polyscope/quantity.h"
 #include "polyscope/render/engine.h"
+#include "polyscope/transformation_gizmo.h"
 
 #include "glm/glm.hpp"
 
@@ -38,10 +39,11 @@ public:
 
   // == Build the ImGUI ui elements
   void buildUI();
-  virtual void buildCustomUI() = 0;      // overridden by childen to add custom UI data
-  virtual void buildCustomOptionsUI();   // overridden by childen to add to the options menu
-  virtual void buildQuantitiesUI();      // build quantities, if they exist. Overridden by QuantityStructure.
-  virtual void buildSharedStructureUI(); // Draw any UI elements shared between all instances of the structure
+  virtual void buildCustomUI() = 0;       // overridden by childen to add custom UI data
+  virtual void buildCustomOptionsUI();    // overridden by childen to add to the options menu
+  virtual void buildStructureOptionsUI(); // overridden by structure quantities to add to the options menu
+  virtual void buildQuantitiesUI();       // build quantities, if they exist. Overridden by QuantityStructure.
+  virtual void buildSharedStructureUI();  // Draw any UI elements shared between all instances of the structure
   virtual void buildPickUI(size_t localPickID) = 0; // Draw pick UI elements when index localPickID is selected
 
   // = Identifying data
@@ -53,24 +55,47 @@ public:
   virtual double lengthScale() = 0;                           // get characteristic length
 
   // = Basic state
-  virtual Structure* setEnabled(bool newEnabled);
-  bool isEnabled();
   virtual std::string typeName() = 0;
 
   // = Scene transform
-  glm::mat4 objectTransform = glm::mat4(1.0);
   glm::mat4 getModelView();
   void centerBoundingBox();
   void rescaleToUnit();
   void resetTransform();
   void setTransformUniforms(render::ShaderProgram& p);
 
+  // Re-perform any setup work, including refreshing all quantities
+  virtual void refresh();
+
   // Get rid of it (invalidates the object and all pointers, etc!)
   void remove();
+
+  // Selection tools
+  virtual Structure* setEnabled(bool newEnabled);
+  bool isEnabled();
+  void enableIsolate();                      // enable this structure, disable all of same type
+  void setEnabledAllOfType(bool newEnabled); // enable/disable all structures of this type
+
+  // Options
+  Structure* setTransparency(double newVal); // also enables transparency if <1 and transparency is not enabled
+  double getTransparency();
+
+  void setIgnoreSlicePlane(std::string name, bool newValue);
+  bool getIgnoreSlicePlane(std::string name);
 
 protected:
   // = State
   PersistentValue<bool> enabled;
+  
+  PersistentValue<glm::mat4> objectTransform;
+
+  // 0 for transparent, 1 for opaque, only has effect if engine transparency is set
+  PersistentValue<float> transparency;
+
+  // Widget that wraps the transform
+  TransformationGizmo transformGizmo;
+  
+  PersistentValue<std::vector<std::string>> ignoredSlicePlaneNames;
 };
 
 
@@ -95,6 +120,10 @@ public:
   virtual ~QuantityStructure() = 0;
 
   virtual void buildQuantitiesUI() override;
+  virtual void buildStructureOptionsUI() override;
+
+  // Re-perform any setup work, including refreshing all quantities
+  virtual void refresh() override;
 
   // = Manage quantities
 
@@ -107,6 +136,8 @@ public:
 
   void setDominantQuantity(Quantity<S>* q);
   void clearDominantQuantity();
+
+  void setAllQuantitiesEnabled(bool newEnabled);
 
   // = Quantities
   std::map<std::string, std::unique_ptr<QuantityType>> quantities;

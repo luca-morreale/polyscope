@@ -42,6 +42,10 @@ void safeDeleteArray(T*& x) {
 // Attempt to get a user-friendly name for a file from its base name
 std::string guessNiceNameFromPath(std::string fullname);
 
+// Ensure that a string satisfies polyscope requirements for structure and quantity names. 
+// Raises an error on failure.
+void validateName(const std::string& name);
+
 // Print large integers in a user-friendly way (like "37.5B")
 std::string prettyPrintCount(size_t count);
 
@@ -65,11 +69,27 @@ inline glm::vec3 componentwiseMin(const glm::vec3& vA, const glm::vec3& vB) {
 inline glm::vec3 componentwiseMax(const glm::vec3& vA, const glm::vec3& vB) {
   return glm::vec3{std::max(vA.x, vB.x), std::max(vA.y, vB.y), std::max(vA.z, vB.z)};
 }
+
+
+// Transformation utilities
+void splitTransform(const glm::mat4& trans, glm::mat3x4& R, glm::vec3& T);
+glm::mat4 buildTransform(const glm::mat3x4& R, const glm::vec3& T);
+
 inline bool isFinite(glm::vec3& v) { return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z); }
 
+inline std::ostream& operator<<(std::ostream& output, const glm::vec2& v) {
+  output << std::setprecision(std::numeric_limits<float>::max_digits10);
+  output << "<" << v.x << ", " << v.y << ">";
+  return output;
+}
 inline std::ostream& operator<<(std::ostream& output, const glm::vec3& v) {
   output << std::setprecision(std::numeric_limits<float>::max_digits10);
   output << "<" << v.x << ", " << v.y << ", " << v.z << ">";
+  return output;
+}
+inline std::ostream& operator<<(std::ostream& output, const glm::vec4& v) {
+  output << std::setprecision(std::numeric_limits<float>::max_digits10);
+  output << "<" << v.x << ", " << v.y << ", " << v.z << "," << v.w << ">";
   return output;
 }
 inline std::string to_string(const glm::vec3& v) {

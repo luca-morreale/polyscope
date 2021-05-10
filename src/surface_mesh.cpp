@@ -5,7 +5,6 @@
 #include "polyscope/pick.h"
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
-#include "polyscope/render/shaders.h"
 
 #include "imgui.h"
 
@@ -26,8 +25,9 @@ SurfaceMesh::SurfaceMesh(std::string name, const std::vector<glm::vec3>& vertexP
     : QuantityStructure<SurfaceMesh>(name, typeName()), vertices(vertexPositions), faces(faceIndices),
       shadeSmooth(uniquePrefix() + "shadeSmooth", false),
       surfaceColor(uniquePrefix() + "surfaceColor", getNextUniqueColor()),
-      edgeColor(uniquePrefix() + "edgeColor", glm::vec3{0., 0., 0.}),
-      material(uniquePrefix() + "material", "clay"), edgeWidth(uniquePrefix() + "edgeWidth", 0.) {
+      edgeColor(uniquePrefix() + "edgeColor", glm::vec3{0., 0., 0.}), material(uniquePrefix() + "material", "clay"),
+      edgeWidth(uniquePrefix() + "edgeWidth", 0.),
+      backfacePolicy(uniquePrefix() + "backfacePolicy", BackfacePolicy::Different) {
 
   computeCounts();
   computeGeometryData();
@@ -244,9 +244,22 @@ void SurfaceMesh::ensureHaveManifoldConnectivity() {
   }
 }
 
-void SurfaceMesh::ensureHaveFaceTangentSpaces() {
-  if (faceTangentSpaces.size() > 0) return;
+bool SurfaceMesh::hasFaceTangentSpaces() { return (faceTangentSpaces.size() > 0); }
 
+bool SurfaceMesh::hasVertexTangentSpaces() { return (vertexTangentSpaces.size() > 0); }
+
+
+void SurfaceMesh::ensureHaveFaceTangentSpaces() {
+  if (hasFaceTangentSpaces()) return;
+  throw std::runtime_error("No face tangent bases registered. see setFaceTangentBasisX()");
+}
+
+void SurfaceMesh::ensureHaveVertexTangentSpaces() {
+  if (hasVertexTangentSpaces()) return;
+  throw std::runtime_error("No vertex tangent bases registered. see setVertexTangentBasisX()");
+}
+
+void SurfaceMesh::generateDefaultFaceTangentSpaces() {
   faceTangentSpaces.resize(nFaces());
 
   for (size_t iF = 0; iF < nFaces(); iF++) {
@@ -268,9 +281,7 @@ void SurfaceMesh::ensureHaveFaceTangentSpaces() {
   }
 }
 
-void SurfaceMesh::ensureHaveVertexTangentSpaces() {
-  if (vertexTangentSpaces.size() > 0) return;
-
+void SurfaceMesh::generateDefaultVertexTangentSpaces() {
   vertexTangentSpaces.resize(nVertices());
   std::vector<char> hasTangent(nVertices(), false);
 
@@ -308,6 +319,7 @@ void SurfaceMesh::draw() {
     return;
   }
 
+  render::engine->setBackfaceCull(backfacePolicy.get() == BackfacePolicy::Cull);
 
   // If no quantity is drawing the surface, we should draw it
   if (dominantQuantity == nullptr) {
@@ -315,14 +327,14 @@ void SurfaceMesh::draw() {
     if (program == nullptr) {
       prepare();
 
-      // do these now to reduce lag when picking later, etc
-      // prepareWireframe();
+      // do this now to reduce lag when picking later, etc
       preparePick();
     }
 
     // Set uniforms
     setTransformUniforms(*program);
-    program->setUniform("u_basecolor", getSurfaceColor());
+    setStructureUniforms(*program);
+    program->setUniform("u_baseColor", getSurfaceColor());
 
     program->draw();
   }
@@ -332,29 +344,7 @@ void SurfaceMesh::draw() {
     x.second->draw();
   }
 
-  // Draw the wireframe
-  if (getEdgeWidth() > 0) {
-    if (wireframeProgram == nullptr) {
-      prepareWireframe();
-    }
-
-    // Set uniforms
-    setTransformUniforms(*wireframeProgram);
-    wireframeProgram->setUniform("u_edgeWidth", getEdgeWidth() * render::engine->getCurrentPixelScaling());
-    wireframeProgram->setUniform("u_edgeColor", getEdgeColor());
-
-    // Make sure wireframe wins depth tests
-    render::engine->setDepthMode(DepthMode::LEqualReadOnly);
-
-    // slightly weird blend function: ensures alpha is set by whatever was drawn before, rather than the wireframe
-    render::engine->setBlendMode(BlendMode::OverNoWrite);
-
-    wireframeProgram->draw();
-
-    // Return to default modes
-    render::engine->setBlendMode();
-    render::engine->setDepthMode();
-  }
+  render::engine->setBackfaceCull(); // return to default setting
 }
 
 void SurfaceMesh::drawPick() {
@@ -373,28 +363,17 @@ void SurfaceMesh::drawPick() {
 }
 
 void SurfaceMesh::prepare() {
-  program = render::engine->generateShaderProgram(
-      {render::PLAIN_SURFACE_VERT_SHADER, render::PLAIN_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+  program = render::engine->requestShader("MESH", addStructureRules({"SHADE_BASECOLOR"}));
 
   // Populate draw buffers
   fillGeometryBuffers(*program);
   render::engine->setMaterial(*program, getMaterial());
 }
 
-void SurfaceMesh::prepareWireframe() {
-  wireframeProgram = render::engine->generateShaderProgram(
-      {render::SURFACE_WIREFRAME_VERT_SHADER, render::SURFACE_WIREFRAME_FRAG_SHADER}, DrawMode::Triangles);
-
-  // Populate draw buffers
-  fillGeometryBuffersWireframe(*wireframeProgram);
-  render::engine->setMaterial(*wireframeProgram, getMaterial());
-}
-
 void SurfaceMesh::preparePick() {
 
   // Create a new program
-  pickProgram = render::engine->generateShaderProgram(
-      {render::PICK_SURFACE_VERT_SHADER, render::PICK_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+  pickProgram = render::engine->requestShader("MESH", {"MESH_PROPAGATE_PICK"}, render::ShaderReplacementDefaults::Pick);
 
   // Get element indices
   size_t totalPickElements = nVertices() + nFaces() + nEdges() + nHalfedges();
@@ -412,6 +391,7 @@ void SurfaceMesh::preparePick() {
 
   // == Fill buffers
   std::vector<glm::vec3> positions;
+  std::vector<glm::vec3> normals;
   std::vector<glm::vec3> bcoord;
   std::vector<std::array<glm::vec3, 3>> vertexColors, edgeColors, halfedgeColors;
   std::vector<glm::vec3> faceColor;
@@ -423,11 +403,13 @@ void SurfaceMesh::preparePick() {
   edgeColors.reserve(3 * nFacesTriangulation());
   halfedgeColors.reserve(3 * nFacesTriangulation());
   faceColor.reserve(3 * nFacesTriangulation());
+  normals.reserve(3 * nFacesTriangulation());
 
   // Build all quantities in each face
   for (size_t iF = 0; iF < nFaces(); iF++) {
     auto& face = faces[iF];
     size_t D = face.size();
+    glm::vec3 faceN = faceNormals[iF];
 
     // implicitly triangulate from root
     size_t vRoot = face[0];
@@ -444,6 +426,10 @@ void SurfaceMesh::preparePick() {
       positions.push_back(pRoot);
       positions.push_back(pB);
       positions.push_back(pC);
+
+      normals.push_back(faceN);
+      normals.push_back(faceN);
+      normals.push_back(faceN);
 
       // Build all quantities
       std::array<glm::vec3, 3> vColor;
@@ -488,133 +474,51 @@ void SurfaceMesh::preparePick() {
   // Store data in buffers
   pickProgram->setAttribute("a_position", positions);
   pickProgram->setAttribute("a_barycoord", bcoord);
+  pickProgram->setAttribute("a_normal", normals);
   pickProgram->setAttribute<glm::vec3, 3>("a_vertexColors", vertexColors);
   pickProgram->setAttribute<glm::vec3, 3>("a_edgeColors", edgeColors);
   pickProgram->setAttribute<glm::vec3, 3>("a_halfedgeColors", halfedgeColors);
   pickProgram->setAttribute("a_faceColor", faceColor);
 }
 
+std::vector<std::string> SurfaceMesh::addStructureRules(std::vector<std::string> initRules) {
+  if (getEdgeWidth() > 0) {
+    initRules.push_back("MESH_WIREFRAME");
+  }
+  if (backfacePolicy.get() == BackfacePolicy::Identical) {
+    initRules.push_back("MESH_BACKFACE_NORMAL_FLIP");
+  }
+  if (backfacePolicy.get() == BackfacePolicy::Different) {
+    initRules.push_back("MESH_BACKFACE_NORMAL_FLIP");
+    initRules.push_back("MESH_BACKFACE_DARKEN");
+  }
+  return initRules;
+}
+
+void SurfaceMesh::setStructureUniforms(render::ShaderProgram& p) {
+  if (getEdgeWidth() > 0) {
+    p.setUniform("u_edgeWidth", getEdgeWidth() * render::engine->getCurrentPixelScaling());
+    p.setUniform("u_edgeColor", getEdgeColor());
+  }
+}
+
 void SurfaceMesh::fillGeometryBuffers(render::ShaderProgram& p) {
-  if (isSmoothShade()) {
-    fillGeometryBuffersSmooth(p);
-  } else {
-    fillGeometryBuffersFlat(p);
-  }
-}
-
-void SurfaceMesh::fillGeometryBuffersSmooth(render::ShaderProgram& p) {
-  std::vector<glm::vec3> positions;
-  std::vector<glm::vec3> normals;
-  std::vector<glm::vec3> bcoord;
-
-  bool wantsBary = p.hasAttribute("a_barycoord");
-
-  // Reserve space
-  positions.reserve(3 * nFacesTriangulation());
-  normals.reserve(3 * nFacesTriangulation());
-  if (wantsBary) {
-    bcoord.reserve(3 * nFacesTriangulation());
-  }
-
-  for (size_t iF = 0; iF < nFaces(); iF++) {
-    auto& face = faces[iF];
-    size_t D = face.size();
-
-    // implicitly triangulate from root
-    size_t vRoot = face[0];
-    glm::vec3 pRoot = vertices[vRoot];
-    for (size_t j = 1; (j + 1) < D; j++) {
-      size_t vB = face[j];
-      glm::vec3 pB = vertices[vB];
-      size_t vC = face[(j + 1) % D];
-      glm::vec3 pC = vertices[vC];
-
-      positions.push_back(pRoot);
-      positions.push_back(pB);
-      positions.push_back(pC);
-
-      normals.push_back(vertexNormals[vRoot]);
-      normals.push_back(vertexNormals[vB]);
-      normals.push_back(vertexNormals[vC]);
-
-      if (wantsBary) {
-        bcoord.push_back(glm::vec3{1., 0., 0.});
-        bcoord.push_back(glm::vec3{0., 1., 0.});
-        bcoord.push_back(glm::vec3{0., 0., 1.});
-      }
-    }
-  }
-
-  // Store data in buffers
-  p.setAttribute("a_position", positions);
-  p.setAttribute("a_normal", normals);
-  if (wantsBary) {
-    p.setAttribute("a_barycoord", bcoord);
-  }
-}
-
-void SurfaceMesh::fillGeometryBuffersFlat(render::ShaderProgram& p) {
-  std::vector<glm::vec3> positions;
-  std::vector<glm::vec3> normals;
-  std::vector<glm::vec3> bcoord;
-
-  bool wantsBary = p.hasAttribute("a_barycoord");
-
-  positions.reserve(3 * nFacesTriangulation());
-  normals.reserve(3 * nFacesTriangulation());
-  if (wantsBary) {
-    bcoord.reserve(3 * nFacesTriangulation());
-  }
-
-  for (size_t iF = 0; iF < nFaces(); iF++) {
-    auto& face = faces[iF];
-    size_t D = face.size();
-    glm::vec3 faceN = faceNormals[iF];
-
-    // implicitly triangulate from root
-    size_t vRoot = face[0];
-    glm::vec3 pRoot = vertices[vRoot];
-    for (size_t j = 1; (j + 1) < D; j++) {
-      size_t vB = face[j];
-      glm::vec3 pB = vertices[vB];
-      size_t vC = face[(j + 1) % D];
-      glm::vec3 pC = vertices[vC];
-
-      positions.push_back(pRoot);
-      positions.push_back(pB);
-      positions.push_back(pC);
-
-      normals.push_back(faceN);
-      normals.push_back(faceN);
-      normals.push_back(faceN);
-
-      if (wantsBary) {
-        bcoord.push_back(glm::vec3{1., 0., 0.});
-        bcoord.push_back(glm::vec3{0., 1., 0.});
-        bcoord.push_back(glm::vec3{0., 0., 1.});
-      }
-    }
-  }
-
-
-  // Store data in buffers
-  p.setAttribute("a_position", positions);
-  p.setAttribute("a_normal", normals);
-  if (wantsBary) {
-    p.setAttribute("a_barycoord", bcoord);
-  }
-}
-
-void SurfaceMesh::fillGeometryBuffersWireframe(render::ShaderProgram& p) {
   std::vector<glm::vec3> positions;
   std::vector<glm::vec3> normals;
   std::vector<glm::vec3> bcoord;
   std::vector<glm::vec3> edgeReal;
 
+  bool wantsBary = p.hasAttribute("a_barycoord");
+  bool wantsEdge = (getEdgeWidth() > 0);
+
   positions.reserve(3 * nFacesTriangulation());
   normals.reserve(3 * nFacesTriangulation());
-  bcoord.reserve(3 * nFacesTriangulation());
-  edgeReal.reserve(3 * nFacesTriangulation());
+  if (wantsBary) {
+    bcoord.reserve(3 * nFacesTriangulation());
+  }
+  if (wantsEdge) {
+    edgeReal.reserve(3 * nFacesTriangulation());
+  }
 
   for (size_t iF = 0; iF < nFaces(); iF++) {
     auto& face = faces[iF];
@@ -634,33 +538,46 @@ void SurfaceMesh::fillGeometryBuffersWireframe(render::ShaderProgram& p) {
       positions.push_back(pB);
       positions.push_back(pC);
 
-      normals.push_back(faceN);
-      normals.push_back(faceN);
-      normals.push_back(faceN);
-
-      bcoord.push_back(glm::vec3{1., 0., 0.});
-      bcoord.push_back(glm::vec3{0., 1., 0.});
-      bcoord.push_back(glm::vec3{0., 0., 1.});
-
-      glm::vec3 edgeRealV{0., 1., 0.};
-      if (j == 1) {
-        edgeRealV.x = 1.;
+      if (isSmoothShade()) {
+        normals.push_back(vertexNormals[vRoot]);
+        normals.push_back(vertexNormals[vB]);
+        normals.push_back(vertexNormals[vC]);
+      } else {
+        normals.push_back(faceN);
+        normals.push_back(faceN);
+        normals.push_back(faceN);
       }
-      if (j + 2 == D) {
-        edgeRealV.z = 1.;
+
+      if (wantsBary) {
+        bcoord.push_back(glm::vec3{1., 0., 0.});
+        bcoord.push_back(glm::vec3{0., 1., 0.});
+        bcoord.push_back(glm::vec3{0., 0., 1.});
       }
-      edgeReal.push_back(edgeRealV);
-      edgeReal.push_back(edgeRealV);
-      edgeReal.push_back(edgeRealV);
+
+      if (wantsEdge) {
+        glm::vec3 edgeRealV{0., 1., 0.};
+        if (j == 1) {
+          edgeRealV.x = 1.;
+        }
+        if (j + 2 == D) {
+          edgeRealV.z = 1.;
+        }
+        edgeReal.push_back(edgeRealV);
+        edgeReal.push_back(edgeRealV);
+        edgeReal.push_back(edgeRealV);
+      }
     }
   }
-
 
   // Store data in buffers
   p.setAttribute("a_position", positions);
   p.setAttribute("a_normal", normals);
-  p.setAttribute("a_barycoord", bcoord);
-  p.setAttribute("a_edgeReal", edgeReal);
+  if (wantsBary) {
+    p.setAttribute("a_barycoord", bcoord);
+  }
+  if (wantsEdge) {
+    p.setAttribute("a_edgeIsReal", edgeReal);
+  }
 }
 
 void SurfaceMesh::buildPickUI(size_t localPickID) {
@@ -882,7 +799,14 @@ void SurfaceMesh::buildCustomUI() {
       // Edge width
       ImGui::SameLine();
       ImGui::PushItemWidth(60);
-      if (ImGui::SliderFloat("Width", &edgeWidth.get(), 0.001, 2.)) setEdgeWidth(getEdgeWidth());
+      if (ImGui::SliderFloat("Width", &edgeWidth.get(), 0.001, 2.)) {
+        // NOTE: this intentionally circumvents the setEdgeWidth() setter to avoid repopulating the buffer as the slider
+        // is dragged---otherwise we repopulate the buffer on every change, which mostly works fine. This is a lazy
+        // solution instead of better state/buffer management.
+        // setEdgeWidth(getEdgeWidth());
+        edgeWidth.manuallyChanged();
+        requestRedraw();
+      }
       ImGui::PopItemWidth();
     }
     ImGui::PopItemWidth();
@@ -894,22 +818,29 @@ void SurfaceMesh::buildCustomOptionsUI() {
     material.manuallyChanged();
     setMaterial(material.get()); // trigger the other updates that happen on set()
   }
-}
 
-
-void SurfaceMesh::geometryChanged() {
-  program.reset();
-  wireframeProgram.reset();
-  pickProgram.reset();
-
-  computeGeometryData();
-
-  for (auto& q : quantities) {
-    q.second->geometryChanged();
+  // backfaces
+  if (ImGui::BeginMenu("Backface Policy")) {
+    if (ImGui::MenuItem("cull", NULL, backfacePolicy.get() == BackfacePolicy::Cull))
+      setBackfacePolicy(BackfacePolicy::Cull);
+    if (ImGui::MenuItem("identical shading", NULL, backfacePolicy.get() == BackfacePolicy::Identical))
+      setBackfacePolicy(BackfacePolicy::Identical);
+    if (ImGui::MenuItem("different shading", NULL, backfacePolicy.get() == BackfacePolicy::Different))
+      setBackfacePolicy(BackfacePolicy::Different);
+    ImGui::EndMenu();
   }
-
-  requestRedraw();
 }
+
+
+void SurfaceMesh::refresh() {
+  computeGeometryData();
+  program.reset();
+  pickProgram.reset();
+  requestRedraw();
+  QuantityStructure<SurfaceMesh>::refresh(); // call base class version, which refreshes quantities
+}
+
+void SurfaceMesh::geometryChanged() { refresh(); }
 
 double SurfaceMesh::lengthScale() {
   // Measure length scale as twice the radius from the center of the bounding box
@@ -918,7 +849,7 @@ double SurfaceMesh::lengthScale() {
 
   double lengthScale = 0.0;
   for (glm::vec3 p : vertices) {
-    glm::vec3 transPos = glm::vec3(objectTransform * glm::vec4(p.x, p.y, p.z, 1.0));
+    glm::vec3 transPos = glm::vec3(objectTransform.get() * glm::vec4(p.x, p.y, p.z, 1.0));
     lengthScale = std::max(lengthScale, (double)glm::length2(transPos - center));
   }
 
@@ -930,7 +861,7 @@ std::tuple<glm::vec3, glm::vec3> SurfaceMesh::boundingBox() {
   glm::vec3 max = -glm::vec3{1, 1, 1} * std::numeric_limits<float>::infinity();
 
   for (glm::vec3 pOrig : vertices) {
-    glm::vec3 p = glm::vec3(objectTransform * glm::vec4(pOrig, 1.0));
+    glm::vec3 p = glm::vec3(objectTransform.get() * glm::vec4(pOrig, 1.0));
     min = componentwiseMin(min, p);
     max = componentwiseMax(max, p);
   }
@@ -943,7 +874,8 @@ std::string SurfaceMesh::typeName() { return structureTypeName; }
 long long int SurfaceMesh::selectVertex() {
 
   // Make sure we can see edges
-  edgeWidth = 1.;
+  float oldEdgeWidth = getEdgeWidth();
+  setEdgeWidth(1.);
   this->setEnabled(true);
 
   long long int returnVertInd = -1;
@@ -999,9 +931,11 @@ long long int SurfaceMesh::selectVertex() {
       }
     }
   };
-
+  
   // Pass control to the context we just created
   pushContext(focusedPopupUI);
+  
+  setEdgeWidth(oldEdgeWidth); // restore edge setting
 
   return returnVertInd;
 }
@@ -1093,7 +1027,7 @@ FacePtr SurfaceMesh::selectFace() {
 
 SurfaceMesh* SurfaceMesh::setSmoothShade(bool isSmooth) {
   shadeSmooth = isSmooth;
-  geometryChanged();
+  refresh();
   requestRedraw();
   return this;
 }
@@ -1115,7 +1049,7 @@ glm::vec3 SurfaceMesh::getEdgeColor() { return edgeColor.get(); }
 
 SurfaceMesh* SurfaceMesh::setMaterial(std::string m) {
   material = m;
-  geometryChanged(); // (serves the purpose of re-initializing everything, though this is a bit overkill)
+  refresh(); // (serves the purpose of re-initializing everything, though this is a bit overkill)
   requestRedraw();
   return this;
 }
@@ -1123,10 +1057,19 @@ std::string SurfaceMesh::getMaterial() { return material.get(); }
 
 SurfaceMesh* SurfaceMesh::setEdgeWidth(double newVal) {
   edgeWidth = newVal;
+  refresh();
   requestRedraw();
   return this;
 }
 double SurfaceMesh::getEdgeWidth() { return edgeWidth.get(); }
+
+SurfaceMesh* SurfaceMesh::setBackfacePolicy(BackfacePolicy newPolicy) {
+  backfacePolicy = newPolicy;
+  refresh();
+  requestRedraw();
+  return this;
+}
+BackfacePolicy SurfaceMesh::getBackfacePolicy() { return backfacePolicy.get(); }
 
 // === Quantity adders
 
@@ -1145,15 +1088,26 @@ SurfaceFaceColorQuantity* SurfaceMesh::addFaceColorQuantityImpl(std::string name
   return q;
 }
 
-SurfaceDistanceQuantity* SurfaceMesh::addVertexDistanceQuantityImpl(std::string name, const std::vector<double>& data) {
-  SurfaceDistanceQuantity* q = new SurfaceDistanceQuantity(name, applyPermutation(data, vertexPerm), *this, false);
+SurfaceVertexScalarQuantity* SurfaceMesh::addVertexDistanceQuantityImpl(std::string name,
+                                                                        const std::vector<double>& data) {
+  SurfaceVertexScalarQuantity* q =
+      new SurfaceVertexScalarQuantity(name, applyPermutation(data, vertexPerm), *this, DataType::MAGNITUDE);
+
+  q->setIsolinesEnabled(true);
+  q->setIsolineWidth(0.02, true);
+
   addQuantity(q);
   return q;
 }
 
-SurfaceDistanceQuantity* SurfaceMesh::addVertexSignedDistanceQuantityImpl(std::string name,
-                                                                          const std::vector<double>& data) {
-  SurfaceDistanceQuantity* q = new SurfaceDistanceQuantity(name, applyPermutation(data, vertexPerm), *this, true);
+SurfaceVertexScalarQuantity* SurfaceMesh::addVertexSignedDistanceQuantityImpl(std::string name,
+                                                                              const std::vector<double>& data) {
+  SurfaceVertexScalarQuantity* q =
+      new SurfaceVertexScalarQuantity(name, applyPermutation(data, vertexPerm), *this, DataType::SYMMETRIC);
+
+  q->setIsolinesEnabled(true);
+  q->setIsolineWidth(0.02, true);
+
   addQuantity(q);
   return q;
 }
@@ -1321,6 +1275,10 @@ void SurfaceMesh::setVertexTangentBasisXImpl(const std::vector<glm::vec3>& vecto
     vertexTangentSpaces[iV][0] = basisX;
     vertexTangentSpaces[iV][1] = basisY;
   }
+
+  // Regenerate all data, in case stored data depends on tangent spaces.
+  // NOTE: This is overkill. We really only need to regenrate the handful of things which depend on tangent spaces.
+  refresh();
 }
 
 void SurfaceMesh::setFaceTangentBasisXImpl(const std::vector<glm::vec3>& vectors) {
@@ -1342,12 +1300,15 @@ void SurfaceMesh::setFaceTangentBasisXImpl(const std::vector<glm::vec3>& vectors
     faceTangentSpaces[iF][0] = basisX;
     faceTangentSpaces[iF][1] = basisY;
   }
+
+  // Regenerate all data, in case stored data depends on tangent spaces.
+  // NOTE: This is overkill. We really only need to regenrate the handful of things which depend on tangent spaces.
+  refresh();
 }
 
 
 SurfaceMeshQuantity::SurfaceMeshQuantity(std::string name, SurfaceMesh& parentStructure, bool dominates)
     : Quantity<SurfaceMesh>(name, parentStructure, dominates) {}
-void SurfaceMeshQuantity::geometryChanged() {}
 void SurfaceMeshQuantity::buildVertexInfoGUI(size_t vInd) {}
 void SurfaceMeshQuantity::buildFaceInfoGUI(size_t fInd) {}
 void SurfaceMeshQuantity::buildEdgeInfoGUI(size_t eInd) {}

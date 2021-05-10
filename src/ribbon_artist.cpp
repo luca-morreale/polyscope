@@ -4,7 +4,6 @@
 #include "polyscope/polyscope.h"
 #include "polyscope/render/color_maps.h"
 #include "polyscope/render/engine.h"
-#include "polyscope/render/shaders.h"
 
 #include "imgui.h"
 
@@ -14,11 +13,15 @@ using std::endl;
 namespace polyscope {
 
 RibbonArtist::RibbonArtist(Structure& parentStructure_,
-                           const std::vector<std::vector<std::array<glm::vec3, 2>>>& ribbons_, std::string uniqueName,
+                           const std::vector<std::vector<std::array<glm::vec3, 2>>>& ribbons_, std::string uniqueName_,
                            double normalOffsetFraction_)
-    : parentStructure(parentStructure_), ribbons(ribbons_), normalOffsetFraction(normalOffsetFraction_),
-      enabled(parentStructure.uniquePrefix() + "#ribbon#" + "uniqueName" + "#enabled", true),
-      ribbonWidth(parentStructure.uniquePrefix() + "#ribbon#" + "uniqueName" + "#ribbonWidth", relativeValue(5e-4)) {
+    : parentStructure(parentStructure_), uniqueName(uniqueName_), ribbons(ribbons_),
+      normalOffsetFraction(normalOffsetFraction_),
+      enabled(parentStructure.uniquePrefix() + "#ribbon#" + uniqueName + "#enabled", true),
+      ribbonWidth(parentStructure.uniquePrefix() + "#ribbon#" + uniqueName + "#ribbonWidth", relativeValue(5e-4)),
+      material(parentStructure.uniquePrefix() + "#ribbon#" + uniqueName + "#enabled", "wax")
+
+{
   createProgram();
 }
 
@@ -27,9 +30,7 @@ void RibbonArtist::deleteProgram() { program.reset(); }
 void RibbonArtist::createProgram() {
 
   // Create the program
-  program = render::engine->generateShaderProgram(
-      {render::RIBBON_VERT_SHADER, render::RIBBON_GEOM_SHADER, render::RIBBON_FRAG_SHADER},
-      DrawMode::IndexedLineStripAdjacency);
+  program = render::engine->requestShader("RIBBON", {});
 
   // Set the restart index for the line strip
   unsigned int restartInd = -1;
@@ -41,7 +42,6 @@ void RibbonArtist::createProgram() {
   // == Fill buffers
 
   // Trace a whole bunch of lines along the surface
-  // TODO Expensive yet trivially parallelizable
   std::vector<glm::vec3> positions;
   std::vector<glm::vec3> normals;
   std::vector<glm::vec3> colors;
@@ -99,7 +99,7 @@ void RibbonArtist::createProgram() {
   program->setAttribute("a_color", colors);
   program->setIndex(indices);
 
-  render::engine->setMaterial(*program, "wax");
+  render::engine->setMaterial(*program, material.get());
 }
 
 
@@ -133,6 +133,19 @@ void RibbonArtist::draw() {
 
 
 void RibbonArtist::buildParametersGUI() {
+  ImGui::PushID(uniqueName.c_str());
+
+  // === Options popup
+  if (ImGui::Button("Options")) {
+    ImGui::OpenPopup("OptionsPopup");
+  }
+  if (ImGui::BeginPopup("OptionsPopup")) {
+    if (render::buildMaterialOptionsGui(material.get())) {
+      material.manuallyChanged();
+      setMaterial(material.get()); // trigger the other updates that happen on set()
+    }
+    ImGui::EndPopup();
+  }
 
   if (render::buildColormapSelector(cMap)) {
     deleteProgram();
@@ -144,6 +157,8 @@ void RibbonArtist::buildParametersGUI() {
     requestRedraw();
   }
   ImGui::PopItemWidth();
+
+  ImGui::PopID();
 }
 
 RibbonArtist* RibbonArtist::setEnabled(bool newEnabled) {
@@ -159,8 +174,17 @@ RibbonArtist* RibbonArtist::setWidth(double newVal, bool isRelative) {
   requestRedraw();
   return this;
 }
-
 double RibbonArtist::getWidth() { return ribbonWidth.get().asAbsolute(); }
+
+RibbonArtist* RibbonArtist::setMaterial(std::string mat) {
+  material = mat;
+  if (program) {
+    render::engine->setMaterial(*program, material.get());
+    requestRedraw();
+  }
+  return this;
+}
+std::string RibbonArtist::getMaterial() { return material.get(); }
 
 
 } // namespace polyscope

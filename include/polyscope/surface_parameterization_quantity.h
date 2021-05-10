@@ -25,7 +25,7 @@ public:
   void draw() override;
   virtual void buildCustomUI() override;
 
-  virtual void geometryChanged() override;
+  virtual void refresh() override;
 
 
   // === Members
@@ -57,12 +57,18 @@ public:
   SurfaceParameterizationQuantity* setColorMap(std::string val);
   std::string getColorMap();
 
+  // Darkness for checkers (etc)
+  SurfaceParameterizationQuantity* setAltDarkness(double newVal);
+  double getAltDarkness();
+    
+
 protected:
   // === Visualiztion options
   PersistentValue<float> checkerSize;
   PersistentValue<ParamVizStyle> vizStyle;
   PersistentValue<glm::vec3> checkColor1, checkColor2;           // for checker (two colors to use)
   PersistentValue<glm::vec3> gridLineColor, gridBackgroundColor; // for GRID (two colors to use)
+  PersistentValue<float> altDarkness;
 
   PersistentValue<std::string> cMap;
   float localRot = 0.; // for LOCAL (angular shift, in radians)

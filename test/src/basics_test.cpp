@@ -58,9 +58,7 @@ TEST_F(PolyscopeTest, InitializeAndShow) { polyscope::show(3); }
 // We should be able to nest calls to show() via the callback. ImGUI causes headaches here
 TEST_F(PolyscopeTest, NestedShow) {
 
-  auto showCallback = [&]() {
-		polyscope::show(3);
-  };
+  auto showCallback = [&]() { polyscope::show(3); };
   polyscope::state::userCallback = showCallback;
   polyscope::show(3);
 
@@ -136,6 +134,20 @@ TEST_F(PolyscopeTest, PointCloudColor) {
   polyscope::removeAllStructures();
 }
 
+TEST_F(PolyscopeTest, PointCloudParam) {
+  auto psPoints = registerPointCloud();
+  std::vector<glm::vec2> param(psPoints->nPoints(), glm::vec2{.2, .3});
+
+  auto q1 = psPoints->addParameterizationQuantity("param", param);
+  q1->setEnabled(true);
+  polyscope::show(3);
+
+  auto q2 = psPoints->addLocalParameterizationQuantity("local param", param);
+  q2->setEnabled(true);
+  polyscope::show(3);
+
+  polyscope::removeAllStructures();
+}
 
 TEST_F(PolyscopeTest, PointCloudScalar) {
   auto psPoints = registerPointCloud();
@@ -152,6 +164,30 @@ TEST_F(PolyscopeTest, PointCloudVector) {
   auto q1 = psPoints->addVectorQuantity("vals", vals);
   q1->setEnabled(true);
   polyscope::show(3);
+  polyscope::removeAllStructures();
+}
+
+
+TEST_F(PolyscopeTest, PointCloudScalarRadius) {
+  auto psPoints = registerPointCloud();
+  std::vector<double> vScalar(psPoints->nPoints(), 7.);
+  std::vector<double> vScalar2(psPoints->nPoints(), 7.);
+  auto q1 = psPoints->addScalarQuantity("vScalar", vScalar);
+  auto q2 = psPoints->addScalarQuantity("vScalar2", vScalar2);
+  q1->setEnabled(true);
+
+  psPoints->setPointRadiusQuantity(q1);
+  polyscope::show(3);
+
+  psPoints->setPointRadiusQuantity("vScalar2");
+  polyscope::show(3);
+
+  psPoints->setPointRadiusQuantity("vScalar2", false); // no autoscaling
+  polyscope::show(3);
+
+  psPoints->clearPointRadiusQuantity();
+  polyscope::show(3);
+
   polyscope::removeAllStructures();
 }
 
@@ -230,6 +266,10 @@ TEST_F(PolyscopeTest, SurfaceMeshPick) {
   auto psMesh = registerTriangleMesh();
 
   // Don't bother trying to actually click on anything, but make sure this doesn't crash
+  polyscope::pick::evaluatePickQuery(77, 88);
+
+  // Do it again with edges enabled
+  psMesh->setEdgeWidth(1.0);
   polyscope::pick::evaluatePickQuery(77, 88);
 
   polyscope::removeAllStructures();
@@ -378,6 +418,8 @@ TEST_F(PolyscopeTest, SurfaceMeshFaceVector) {
 
 TEST_F(PolyscopeTest, SurfaceMeshVertexIntrinsic) {
   auto psMesh = registerTriangleMesh();
+  std::vector<glm::vec3> basisX(psMesh->nVertices(), {1., 2., 3.});
+  psMesh->setVertexTangentBasisX(basisX);
   std::vector<glm::vec2> vals(psMesh->nVertices(), {1., 2.});
   auto q1 = psMesh->addVertexIntrinsicVectorQuantity("param", vals);
   q1->setEnabled(true);
@@ -387,6 +429,8 @@ TEST_F(PolyscopeTest, SurfaceMeshVertexIntrinsic) {
 
 TEST_F(PolyscopeTest, SurfaceMeshFaceIntrinsic) {
   auto psMesh = registerTriangleMesh();
+  std::vector<glm::vec3> basisX(psMesh->nFaces(), {1., 2., 3.});
+  psMesh->setFaceTangentBasisX(basisX);
   std::vector<glm::vec2> vals(psMesh->nFaces(), {1., 2.});
   auto q1 = psMesh->addFaceIntrinsicVectorQuantity("param", vals);
   q1->setEnabled(true);
@@ -394,8 +438,24 @@ TEST_F(PolyscopeTest, SurfaceMeshFaceIntrinsic) {
   polyscope::removeAllStructures();
 }
 
+TEST_F(PolyscopeTest, SurfaceMeshOneForm) {
+  auto psMesh = registerTriangleMesh();
+  // std::vector<glm::vec3> basisX(psMesh->nVertices(), {1., 2., 3.});
+  // psMesh->setVertexTangentBasisX(basisX);
+  std::vector<double> vals(psMesh->nEdges(), 3.);
+  std::vector<char> orients(psMesh->nEdges(), true);
+  auto q1 = psMesh->addOneFormIntrinsicVectorQuantity("one form vecs", vals, orients);
+  q1->setEnabled(true);
+  polyscope::show(3);
+  polyscope::removeAllStructures();
+}
+
 TEST_F(PolyscopeTest, SurfaceMeshVertexIntrinsicRibbon) {
   auto psMesh = registerTriangleMesh();
+  std::vector<glm::vec3> basisX(psMesh->nVertices(), {1., 2., 3.});
+  psMesh->setVertexTangentBasisX(basisX);
+  std::vector<glm::vec3> basisXF(psMesh->nFaces(), {1., 2., 3.});
+  psMesh->setFaceTangentBasisX(basisXF);
   std::vector<glm::vec2> vals(psMesh->nVertices(), {1., 2.});
   auto q1 = psMesh->addVertexIntrinsicVectorQuantity("param", vals);
   q1->setEnabled(true);
@@ -406,6 +466,8 @@ TEST_F(PolyscopeTest, SurfaceMeshVertexIntrinsicRibbon) {
 
 TEST_F(PolyscopeTest, SurfaceMeshFaceIntrinsicRibbon) {
   auto psMesh = registerTriangleMesh();
+  std::vector<glm::vec3> basisX(psMesh->nFaces(), {1., 2., 3.});
+  psMesh->setFaceTangentBasisX(basisX);
   std::vector<glm::vec2> vals(psMesh->nFaces(), {1., 2.});
   auto q1 = psMesh->addFaceIntrinsicVectorQuantity("param", vals);
   q1->setEnabled(true);
@@ -591,3 +653,120 @@ TEST_F(PolyscopeTest, CurveNetworkFaceVector) {
   polyscope::removeAllStructures();
 }
 
+
+// ============================================================
+// =============== Combo test
+// ============================================================
+
+
+// Register a handful of quantities / structures, then call refresh
+TEST_F(PolyscopeTest, RefreshMultiTest) {
+
+  { // Surface mesh
+    auto psMesh = registerTriangleMesh();
+    std::vector<double> vScalar(psMesh->nVertices(), 7.);
+    auto q1 = psMesh->addVertexDistanceQuantity("distance", vScalar);
+  }
+
+  { // Point cloud
+    auto psPoints = registerPointCloud();
+    std::vector<double> vScalar(psPoints->nPoints(), 7.);
+    auto q2 = psPoints->addScalarQuantity("vScalar", vScalar);
+    q2->setEnabled(true);
+  }
+
+  { // Curve network
+    auto psCurve = registerCurveNetwork();
+    std::vector<glm::vec3> vals(psCurve->nEdges(), {1., 2., 3.});
+    auto q3 = psCurve->addEdgeVectorQuantity("vals", vals);
+    q3->setEnabled(true);
+  }
+
+  polyscope::show(3);
+
+  polyscope::refresh();
+  polyscope::show(3);
+
+  polyscope::removeAllStructures();
+}
+
+// Cycle through the transparency optins
+TEST_F(PolyscopeTest, TransparencyTest) {
+
+  { // Surface mesh
+    auto psMesh = registerTriangleMesh();
+    std::vector<double> vScalar(psMesh->nVertices(), 7.);
+    auto q1 = psMesh->addVertexDistanceQuantity("distance", vScalar);
+  }
+
+  { // Point cloud
+    auto psPoints = registerPointCloud();
+    std::vector<double> vScalar(psPoints->nPoints(), 7.);
+    auto q2 = psPoints->addScalarQuantity("vScalar", vScalar);
+    q2->setEnabled(true);
+  }
+
+  { // Curve network
+    auto psCurve = registerCurveNetwork();
+    std::vector<glm::vec3> vals(psCurve->nEdges(), {1., 2., 3.});
+    auto q3 = psCurve->addEdgeVectorQuantity("vals", vals);
+    q3->setEnabled(true);
+  }
+
+  polyscope::show(3);
+
+  polyscope::options::transparencyMode = polyscope::TransparencyMode::Simple;
+  polyscope::show(3);
+
+  polyscope::options::transparencyMode = polyscope::TransparencyMode::Pretty;
+  polyscope::show(3);
+
+  polyscope::removeAllStructures();
+}
+
+// Do some slice plane stuff
+TEST_F(PolyscopeTest, SlicePlaneTest) {
+
+  // Surface mesh
+  auto psMesh = registerTriangleMesh();
+  std::vector<double> vScalar(psMesh->nVertices(), 7.);
+  auto q1 = psMesh->addVertexDistanceQuantity("distance", vScalar);
+
+  { // Point cloud
+    auto psPoints = registerPointCloud();
+    std::vector<double> vScalar(psPoints->nPoints(), 7.);
+    auto q2 = psPoints->addScalarQuantity("vScalar", vScalar);
+    q2->setEnabled(true);
+  }
+
+  { // Curve network
+    auto psCurve = registerCurveNetwork();
+    std::vector<glm::vec3> vals(psCurve->nEdges(), {1., 2., 3.});
+    auto q3 = psCurve->addEdgeVectorQuantity("vals", vals);
+    q3->setEnabled(true);
+  }
+
+  polyscope::show(3);
+
+  // render with one slice plane
+  polyscope::addSceneSlicePlane();
+  polyscope::show(3);
+
+  // add another and rotate it
+  polyscope::SlicePlane* p = polyscope::addSceneSlicePlane();
+  p->setTransform(glm::translate(p->getTransform(), glm::vec3{-1., 0., 0.}));
+  polyscope::show(3);
+
+  // test removal
+  polyscope::removeLastSceneSlicePlane();
+  polyscope::show(3);
+
+  // make one structure ignore the plane
+  psMesh->setIgnoreSlicePlane(polyscope::state::slicePlanes[0]->name, true);
+  polyscope::show(3);
+
+  // remove the last plane so we don't leave it around for future tests
+  polyscope::removeLastSceneSlicePlane();
+
+  polyscope::removeAllStructures();
+}

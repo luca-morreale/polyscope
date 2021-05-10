@@ -7,10 +7,25 @@
 #include "polyscope/polyscope.h"
 #include "polyscope/utilities.h"
 
+#include "polyscope/render/shader_builder.h"
+
+// all the shaders
 #include "polyscope/render/opengl/shaders/common.h"
-#include "polyscope/render/shaders.h"
+#include "polyscope/render/opengl/shaders/cylinder_shaders.h"
+#include "polyscope/render/opengl/shaders/gizmo_shaders.h"
+#include "polyscope/render/opengl/shaders/ground_plane_shaders.h"
+#include "polyscope/render/opengl/shaders/histogram_shaders.h"
+#include "polyscope/render/opengl/shaders/lighting_shaders.h"
+#include "polyscope/render/opengl/shaders/ribbon_shaders.h"
+#include "polyscope/render/opengl/shaders/rules.h"
+#include "polyscope/render/opengl/shaders/sphere_shaders.h"
+#include "polyscope/render/opengl/shaders/surface_mesh_shaders.h"
+#include "polyscope/render/opengl/shaders/texture_draw_shaders.h"
+#include "polyscope/render/opengl/shaders/vector_shaders.h"
 
 #include "stb_image.h"
+
+#include <set>
 
 namespace polyscope {
 namespace render {
@@ -20,7 +35,6 @@ unsigned int getCousineRegularCompressedSize();
 const unsigned int* getCousineRegularCompressedData();
 
 namespace backend_openGL3_glfw {
-
 
 GLEngine* glEngine = nullptr; // alias for global engine pointer
 
@@ -43,8 +57,10 @@ inline GLenum internalFormat(const TextureFormat& x) {
     case TextureFormat::RGB16F:     return GL_RGB16F;
     case TextureFormat::RGBA16F:    return GL_RGBA16F;
     case TextureFormat::R32F:       return GL_R32F;
+    case TextureFormat::R16F:       return GL_R16F;
     case TextureFormat::RGB32F:     return GL_RGBA32F;
     case TextureFormat::RGBA32F:    return GL_RGBA32F;
+    case TextureFormat::DEPTH24:    return GL_DEPTH_COMPONENT24;
   }
   throw std::runtime_error("bad enum");
 }
@@ -57,8 +73,10 @@ inline GLenum formatF(const TextureFormat& x) {
     case TextureFormat::RGB16F:     return GL_RGB; 
     case TextureFormat::RGBA16F:    return GL_RGBA;
     case TextureFormat::R32F:       return GL_RED;
+    case TextureFormat::R16F:       return GL_RED;
     case TextureFormat::RGB32F:     return GL_RGB;
     case TextureFormat::RGBA32F:    return GL_RGBA;
+    case TextureFormat::DEPTH24:    return GL_DEPTH_COMPONENT;
   }
   throw std::runtime_error("bad enum");
 }
@@ -71,8 +89,10 @@ inline GLenum type(const TextureFormat& x) {
     case TextureFormat::RGB16F:     return GL_HALF_FLOAT;
     case TextureFormat::RGBA16F:    return GL_HALF_FLOAT;
     case TextureFormat::R32F:       return GL_FLOAT;
+    case TextureFormat::R16F:       return GL_FLOAT;
     case TextureFormat::RGB32F:     return GL_FLOAT;
     case TextureFormat::RGBA32F:    return GL_FLOAT;
+    case TextureFormat::DEPTH24:    return GL_FLOAT;
   }
   throw std::runtime_error("bad enum");
 }
@@ -121,7 +141,7 @@ inline GLenum colorAttachNum(const unsigned int i) {
 // Stateful error checker
 void checkGLError(bool fatal = true) {
 
-  if(!options::enableRenderErrorChecks) {
+  if (!options::enableRenderErrorChecks) {
     return;
   }
 
@@ -245,21 +265,6 @@ GLTextureBuffer::GLTextureBuffer(TextureFormat format_, unsigned int sizeX_, uns
   setFilterMode(FilterMode::Nearest);
 }
 
-GLTextureBuffer::GLTextureBuffer(TextureFormat format_, unsigned int sizeX_, unsigned int sizeY_, unsigned int nSamples)
-    : TextureBuffer(2, format_, sizeX_, sizeY_) {
-
-  isMultisample = true;
-  multisampleCount = nSamples;
-
-  glGenTextures(1, &handle);
-  glBindTexture(GL_TEXTURE_2D_MULTISAMPLE, handle);
-  glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, multisampleCount, internalFormat(format), sizeX, sizeY, GL_TRUE);
-  checkGLError();
-
-  // setFilterMode(FilterMode::Nearest); // openGL rejects this?
-}
-
-
 GLTextureBuffer::~GLTextureBuffer() { glDeleteTextures(1, &handle); }
 
 void GLTextureBuffer::resize(unsigned int newLen) {
@@ -285,31 +290,7 @@ void GLTextureBuffer::resize(unsigned int newX, unsigned int newY) {
     throw std::runtime_error("OpenGL error: called 2D resize on 1D texture");
   }
   if (dim == 2) {
-    if (isMultisample) {
-      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, multisampleCount, internalFormat(format), sizeX, sizeY,
-                              GL_TRUE);
-    } else {
-      glTexImage2D(GL_TEXTURE_2D, 0, internalFormat(format), sizeX, sizeY, 0, formatF(format), type(format), nullptr);
-    }
-  }
-  checkGLError();
-}
-
-void GLTextureBuffer::resize(unsigned int newX, unsigned int newY, unsigned int nSamples) {
-
-  TextureBuffer::resize(newX, newY, nSamples);
-
-  bind();
-  if (dim == 1) {
-    throw std::runtime_error("OpenGL error: called 2D resize on 1D texture");
-  }
-  if (dim == 2) {
-    if (isMultisample) {
-      glTexImage2DMultisample(GL_TEXTURE_2D_MULTISAMPLE, multisampleCount, internalFormat(format), sizeX, sizeY,
-                              GL_TRUE);
-    } else {
-      throw std::runtime_error("OpenGL error: called 2D multisample resize on non-multisample texture");
-    }
+    glTexImage2D(GL_TEXTURE_2D, 0, internalFormat(format), sizeX, sizeY, 0, formatF(format), type(format), nullptr);
   }
   checkGLError();
 }
@@ -338,15 +319,54 @@ void GLTextureBuffer::setFilterMode(FilterMode newMode) {
 
 void* GLTextureBuffer::getNativeHandle() { return reinterpret_cast<void*>(getHandle()); }
 
+std::vector<float> GLTextureBuffer::getDataScalar() {
+  if (dimension(format) != 1)
+    throw std::runtime_error("called getDataScalar on texture which does not have a 1 dimensional format");
+
+  std::vector<float> outData;
+  outData.resize(getTotalSize());
+
+  bind();
+  glGetTexImage(textureType(), 0, formatF(format), GL_FLOAT, static_cast<void*>(&outData.front()));
+  checkGLError();
+
+  return outData;
+}
+
+std::vector<glm::vec2> GLTextureBuffer::getDataVector2() {
+  if (dimension(format) != 2)
+    throw std::runtime_error("called getDataVector2 on texture which does not have a 2 dimensional format");
+
+  std::vector<glm::vec2> outData;
+  outData.resize(getTotalSize());
+
+  bind();
+  glGetTexImage(textureType(), 0, formatF(format), GL_FLOAT, static_cast<void*>(&outData.front()));
+  checkGLError();
+
+  return outData;
+}
+
+std::vector<glm::vec3> GLTextureBuffer::getDataVector3() {
+  if (dimension(format) != 3)
+    throw std::runtime_error("called getDataVector3 on texture which does not have a 3 dimensional format");
+  throw std::runtime_error("not implemented");
+
+  std::vector<glm::vec3> outData;
+  outData.resize(getTotalSize());
+
+  bind();
+  glGetTexImage(textureType(), 0, formatF(format), GL_FLOAT, static_cast<void*>(&outData.front()));
+  checkGLError();
+
+  return outData;
+}
+
 GLenum GLTextureBuffer::textureType() {
   if (dim == 1) {
     return GL_TEXTURE_1D;
-  } else {
-    if (isMultisample) {
-      return GL_TEXTURE_2D_MULTISAMPLE;
-    } else {
-      return GL_TEXTURE_2D;
-    }
+  } else if (dim == 2) {
+    return GL_TEXTURE_2D;
   }
   throw std::runtime_error("bad texture type");
 }
@@ -367,14 +387,6 @@ GLRenderBuffer::GLRenderBuffer(RenderBufferType type_, unsigned int sizeX_, unsi
   resize(sizeX, sizeY);
 }
 
-GLRenderBuffer::GLRenderBuffer(RenderBufferType type_, unsigned int sizeX_, unsigned int sizeY_, unsigned int nSamples_)
-    : RenderBuffer(type_, sizeX_, sizeY_) {
-  isMultisample = true;
-  multisampleCount = nSamples_;
-  glGenRenderbuffers(1, &handle);
-  checkGLError();
-  resize(sizeX, sizeY);
-}
 
 GLRenderBuffer::~GLRenderBuffer() { glDeleteRenderbuffers(1, &handle); }
 
@@ -382,23 +394,7 @@ void GLRenderBuffer::resize(unsigned int newX, unsigned int newY) {
   RenderBuffer::resize(newX, newY);
   bind();
 
-  if (isMultisample) {
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, multisampleCount, native(type), sizeX, sizeY);
-  } else {
-    glRenderbufferStorage(GL_RENDERBUFFER, native(type), sizeX, sizeY);
-  }
-  checkGLError();
-}
-
-void GLRenderBuffer::resize(unsigned int newX, unsigned int newY, unsigned int nSamples) {
-  RenderBuffer::resize(newX, newY, nSamples);
-  bind();
-
-  if (isMultisample) {
-    glRenderbufferStorageMultisample(GL_RENDERBUFFER, multisampleCount, native(type), sizeX, sizeY);
-  } else {
-    throw std::runtime_error("OpenGL error: called multisample resize on non-multisample renderbuffer");
-  }
+  glRenderbufferStorage(GL_RENDERBUFFER, native(type), sizeX, sizeY);
   checkGLError();
 }
 
@@ -477,12 +473,8 @@ void GLFrameBuffer::addColorBuffer(std::shared_ptr<TextureBuffer> textureBufferI
   bind();
   checkGLError();
 
-  if (textureBufferIn->isMultisample) {
-    glFramebufferTexture2D(GL_FRAMEBUFFER, colorAttachNum(nColorBuffers), GL_TEXTURE_2D_MULTISAMPLE,
-                           textureBuffer->getHandle(), 0);
-  } else {
-    glFramebufferTexture2D(GL_FRAMEBUFFER, colorAttachNum(nColorBuffers), GL_TEXTURE_2D, textureBuffer->getHandle(), 0);
-  }
+  glFramebufferTexture2D(GL_FRAMEBUFFER, colorAttachNum(nColorBuffers), GL_TEXTURE_2D, textureBuffer->getHandle(), 0);
+
   checkGLError();
   textureBuffersColor.push_back(textureBuffer);
   nColorBuffers++;
@@ -514,7 +506,9 @@ void GLFrameBuffer::setDrawBuffers() {
   for (int i = 0; i < nColorBuffers; i++) {
     buffs.push_back(GL_COLOR_ATTACHMENT0 + i);
   }
-  glDrawBuffers(nColorBuffers, &buffs.front());
+  if (nColorBuffers > 0) {
+    glDrawBuffers(nColorBuffers, &buffs.front());
+  }
   checkGLError();
 }
 
@@ -556,8 +550,9 @@ bool GLFrameBuffer::bindForRendering() {
 
 void GLFrameBuffer::clear() {
   if (!bindForRendering()) return;
+
   glClearColor(clearColor[0], clearColor[1], clearColor[2], clearAlpha);
-  glClearDepth(1.);
+  glClearDepth(clearDepth);
   glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
 }
 
@@ -570,11 +565,32 @@ std::array<float, 4> GLFrameBuffer::readFloat4(int xPos, int yPos) {
   glFlush();
   glFinish();
 
+  bind();
+
   // Read from the buffer
   std::array<float, 4> result;
   glReadPixels(xPos, yPos, 1, 1, GL_RGBA, GL_FLOAT, &result);
 
   return result;
+}
+
+
+std::vector<unsigned char> GLFrameBuffer::readBuffer() {
+
+  glFlush();
+  glFinish();
+
+  bind();
+
+  int w = getSizeX();
+  int h = getSizeY();
+
+  // Read from openGL
+  size_t buffSize = w * h * 4;
+  std::vector<unsigned char> buff(buffSize);
+  glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, &(buff.front()));
+
+  return buff;
 }
 
 void GLFrameBuffer::blitTo(FrameBuffer* targetIn) {
@@ -688,9 +704,18 @@ void GLShaderProgram::compileGLProgram(const std::vector<ShaderStageSpecificatio
     std::array<const char*, 2> srcs = {s.src.c_str(), shaderCommonSource};
     glShaderSource(h, 2, &(srcs[0]), nullptr);
     glCompileShader(h);
-    printShaderInfoLog(h);
+
+    // Catch the error here, so we can print shader source before re-throwing
+    try {
+      printShaderInfoLog(h);
+      checkGLError();
+    } catch (...) {
+      std::cout << "GLError() after shader compilation! Program text:" << std::endl;
+      std::cout << s.src.c_str() << std::endl;
+      throw;
+    }
+
     handles.push_back(h);
-    checkGLError();
   }
 
   // Create the program and attach the shaders
@@ -710,7 +735,7 @@ void GLShaderProgram::compileGLProgram(const std::vector<ShaderStageSpecificatio
   }
 
   checkGLError();
-}
+} // namespace backend_openGL3_glfw
 
 void GLShaderProgram::setDataLocations() {
   glUseProgram(programHandle);
@@ -891,6 +916,7 @@ void GLShaderProgram::setUniform(std::string name, double val) {
 }
 
 // Set a 4x4 uniform matrix
+// TODO why do we use a pointer here... makes no sense
 void GLShaderProgram::setUniform(std::string name, float* val) {
   glUseProgram(programHandle);
 
@@ -1002,6 +1028,15 @@ bool GLShaderProgram::hasAttribute(std::string name) {
   for (GLShaderAttribute& a : attributes) {
     if (a.name == name) {
       return true;
+    }
+  }
+  return false;
+}
+
+bool GLShaderProgram::attributeIsSet(std::string name) {
+  for (GLShaderAttribute& a : attributes) {
+    if (a.name == name) {
+      return a.dataSize != -1;
     }
   }
   return false;
@@ -1267,6 +1302,15 @@ bool GLShaderProgram::hasTexture(std::string name) {
   return false;
 }
 
+bool GLShaderProgram::textureIsSet(std::string name) {
+  for (GLShaderTexture& t : textures) {
+    if (t.name == name) {
+      return t.isSet;
+    }
+  }
+  return false;
+}
+
 void GLShaderProgram::setTexture1D(std::string name, unsigned char* texData, unsigned int length) {
   throw std::invalid_argument("This code hasn't been testded yet.");
 
@@ -1527,7 +1571,6 @@ void GLShaderProgram::activateTextures() {
 
     glActiveTexture(GL_TEXTURE0 + t.index);
     t.textureBuffer->bind();
-    if (t.textureBuffer->isMultisample) throw std::runtime_error("OpenGL can't sample from multisample textures");
     glUniform1i(t.location, t.index);
   }
 }
@@ -1651,16 +1694,16 @@ void GLEngine::initialize() {
   glfwPollEvents();
 #endif
 
-  glEnable(GL_MULTISAMPLE);
-
-
   { // Manually create the screen frame buffer
     GLFrameBuffer* glScreenBuffer = new GLFrameBuffer(view::bufferWidth, view::bufferHeight, true);
     displayBuffer.reset(glScreenBuffer);
-    // glScreenBuffer->bind();
-    // glClearColor(1., 1., 1., 0.);
+    glScreenBuffer->bind();
+    glClearColor(1., 1., 1., 0.);
+    // glClearColor(0., 0., 0., 0.);
     // glClearDepth(1.);
   }
+
+  populateDefaultShadersAndRules();
 }
 
 
@@ -1702,6 +1745,8 @@ void GLEngine::swapDisplayBuffers() {
 
 std::vector<unsigned char> GLEngine::readDisplayBuffer() {
 
+  // TODO do we need to bind here?
+
   glFlush();
   glFinish();
 
@@ -1726,6 +1771,12 @@ void GLEngine::checkError(bool fatal) { checkGLError(fatal); }
 void GLEngine::makeContextCurrent() { glfwMakeContextCurrent(mainWindow); }
 
 void GLEngine::showWindow() { glfwShowWindow(mainWindow); }
+
+void GLEngine::hideWindow() {
+  glfwHideWindow(mainWindow);
+  glfwPollEvents(); // this shouldn't be necessary, but seems to be needed at least on macOS. Perhaps realted to a glfw
+                    // bug? e.g. https://github.com/glfw/glfw/issues/1300 and related bugs
+}
 
 void GLEngine::updateWindowSize(bool force) {
   int newBufferWidth, newBufferHeight, newWindowWidth, newWindowHeight;
@@ -1798,6 +1849,11 @@ void GLEngine::setDepthMode(DepthMode newMode) {
     glDepthFunc(GL_LEQUAL);
     glDepthMask(GL_FALSE);
     break;
+  case DepthMode::Greater:
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_GREATER);
+    glDepthMask(GL_TRUE);
+    break;
   case DepthMode::Disable:
     glDisable(GL_DEPTH_TEST);
     glDepthMask(GL_FALSE); // doesn't actually matter
@@ -1811,13 +1867,29 @@ void GLEngine::setBlendMode(BlendMode newMode) {
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     break;
+  case BlendMode::AlphaOver:
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+    break;
   case BlendMode::OverNoWrite:
     glEnable(GL_BLEND);
     glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ZERO, GL_ONE);
     break;
+  case BlendMode::Under:
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_ONE_MINUS_DST_ALPHA, GL_ONE);
+    break;
   case BlendMode::Zero:
     glEnable(GL_BLEND);
     glBlendFunc(GL_ZERO, GL_ZERO);
+    break;
+  case BlendMode::WeightedAdd:
+    glEnable(GL_BLEND);
+    glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE, GL_ONE, GL_ONE);
+    break;
+  case BlendMode::Source:
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ZERO);
     break;
   case BlendMode::Disable:
     glDisable(GL_BLEND);
@@ -1828,18 +1900,42 @@ void GLEngine::setBlendMode(BlendMode newMode) {
 
 void GLEngine::setColorMask(std::array<bool, 4> mask) { glColorMask(mask[0], mask[1], mask[2], mask[3]); }
 
+void GLEngine::setBackfaceCull(bool newVal) {
+  if (newVal) {
+    glEnable(GL_CULL_FACE);
+    glCullFace(GL_BACK);
+  } else {
+    glDisable(GL_CULL_FACE);
+  }
+}
+
 std::string GLEngine::getClipboardText() {
   std::string clipboardData = ImGui::GetClipboardText();
   return clipboardData;
 }
 
-// void GLEngine::blitSceneToFinal() { TODO
-// sceneBuffer->bindForRendering();
-// sceneBufferFinal->blitTo();
-//}
-
-
 void GLEngine::setClipboardText(std::string text) { ImGui::SetClipboardText(text.c_str()); }
+
+void GLEngine::applyTransparencySettings() {
+  // Remove any old transparency-related rules
+  switch (transparencyMode) {
+  case TransparencyMode::None: {
+    setBlendMode();
+    setDepthMode();
+    break;
+  }
+  case TransparencyMode::Simple: {
+    setBlendMode(BlendMode::WeightedAdd);
+    setDepthMode(DepthMode::Disable);
+    break;
+  }
+  case TransparencyMode::Pretty: {
+    setBlendMode(BlendMode::Disable);
+    setDepthMode();
+    break;
+  }
+  }
+}
 
 // == Factories
 std::shared_ptr<TextureBuffer> GLEngine::generateTextureBuffer(TextureFormat format, unsigned int size1D,
@@ -1862,21 +1958,10 @@ std::shared_ptr<TextureBuffer> GLEngine::generateTextureBuffer(TextureFormat for
   GLTextureBuffer* newT = new GLTextureBuffer(format, sizeX_, sizeY_, data);
   return std::shared_ptr<TextureBuffer>(newT);
 }
-std::shared_ptr<TextureBuffer> GLEngine::generateTextureBufferMultisample(TextureFormat format, unsigned int sizeX_,
-                                                                          unsigned int sizeY_, unsigned int nSamples) {
-  GLTextureBuffer* newT = new GLTextureBuffer(format, sizeX_, sizeY_, nSamples);
-  return std::shared_ptr<TextureBuffer>(newT);
-}
 
 std::shared_ptr<RenderBuffer> GLEngine::generateRenderBuffer(RenderBufferType type, unsigned int sizeX_,
                                                              unsigned int sizeY_) {
   GLRenderBuffer* newR = new GLRenderBuffer(type, sizeX_, sizeY_);
-  return std::shared_ptr<RenderBuffer>(newR);
-}
-
-std::shared_ptr<RenderBuffer> GLEngine::generateRenderBufferMultisample(RenderBufferType type, unsigned int sizeX_,
-                                                                        unsigned int sizeY_, unsigned int nSamples) {
-  GLRenderBuffer* newR = new GLRenderBuffer(type, sizeX_, sizeY_, nSamples);
   return std::shared_ptr<RenderBuffer>(newR);
 }
 
@@ -1886,9 +1971,156 @@ std::shared_ptr<FrameBuffer> GLEngine::generateFrameBuffer(unsigned int sizeX_, 
 }
 
 std::shared_ptr<ShaderProgram> GLEngine::generateShaderProgram(const std::vector<ShaderStageSpecification>& stages,
-                                                               DrawMode dm, unsigned int nPatchVertices) {
-  GLShaderProgram* newP = new GLShaderProgram(stages, dm, nPatchVertices);
+                                                               DrawMode dm) {
+  GLShaderProgram* newP = new GLShaderProgram(stages, dm);
   return std::shared_ptr<ShaderProgram>(newP);
+}
+
+std::shared_ptr<ShaderProgram> GLEngine::requestShader(const std::string& programName,
+                                                       const std::vector<std::string>& customRules,
+                                                       ShaderReplacementDefaults defaults) {
+
+  // Get the program
+  if (registeredShaderPrograms.find(programName) == registeredShaderPrograms.end()) {
+    throw std::runtime_error("No shader program with name [" + programName + "] registered.");
+  }
+  const std::vector<ShaderStageSpecification>& stages = registeredShaderPrograms[programName].first;
+  DrawMode dm = registeredShaderPrograms[programName].second;
+
+  // Add in the default rules
+  std::vector<std::string> fullCustomRules = customRules;
+  switch (defaults) {
+  case ShaderReplacementDefaults::SceneObject: {
+    fullCustomRules.insert(fullCustomRules.begin(), defaultRules_sceneObject.begin(), defaultRules_sceneObject.end());
+    break;
+  }
+  case ShaderReplacementDefaults::Pick: {
+    fullCustomRules.insert(fullCustomRules.begin(), defaultRules_pick.begin(), defaultRules_pick.end());
+    break;
+  }
+  case ShaderReplacementDefaults::Process: {
+    fullCustomRules.insert(fullCustomRules.begin(), defaultRules_process.begin(), defaultRules_process.end());
+    break;
+  }
+  case ShaderReplacementDefaults::None: {
+    break;
+  }
+  }
+
+  // Get the rules
+  std::vector<ShaderReplacementRule> rules;
+  for (auto it = fullCustomRules.begin(); it < fullCustomRules.end(); it++) {
+    std::string& ruleName = *it;
+
+    // Only process each rule the first time it is seen
+    if (std::find(fullCustomRules.begin(), it, ruleName) != it) {
+      continue;
+    }
+
+    if (registeredShaderRules.find(ruleName) == registeredShaderRules.end()) {
+      throw std::runtime_error("No shader replacement rule with name [" + ruleName + "] registered.");
+    }
+    ShaderReplacementRule& thisRule = registeredShaderRules[ruleName];
+    rules.push_back(thisRule);
+  }
+
+  std::vector<ShaderStageSpecification> updatedStages = applyShaderReplacements(stages, rules);
+  return generateShaderProgram(updatedStages, dm);
+}
+
+void GLEngine::populateDefaultShadersAndRules() {
+  // Note: we use .insert({key, value}) rather than map[key] = value to support const members in the value.
+
+  // clang-format off
+
+  // == Load general base shaders
+  registeredShaderPrograms.insert({"MESH", {{FLEX_MESH_VERT_SHADER, FLEX_MESH_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"RAYCAST_SPHERE", {{FLEX_SPHERE_VERT_SHADER, FLEX_SPHERE_GEOM_SHADER, FLEX_SPHERE_FRAG_SHADER}, DrawMode::Points}});
+  registeredShaderPrograms.insert({"RAYCAST_VECTOR", {{FLEX_VECTOR_VERT_SHADER, FLEX_VECTOR_GEOM_SHADER, FLEX_VECTOR_FRAG_SHADER}, DrawMode::Points}});
+  registeredShaderPrograms.insert({"RAYCAST_CYLINDER", {{FLEX_CYLINDER_VERT_SHADER, FLEX_CYLINDER_GEOM_SHADER, FLEX_CYLINDER_FRAG_SHADER}, DrawMode::Points}});
+  registeredShaderPrograms.insert({"HISTOGRAM", {{HISTOGRAM_VERT_SHADER, HISTOGRAM_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"GROUND_PLANE_TILE", {{GROUND_PLANE_VERT_SHADER, GROUND_PLANE_TILE_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"GROUND_PLANE_TILE_REFLECT", {{GROUND_PLANE_VERT_SHADER, GROUND_PLANE_TILE_REFLECT_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"GROUND_PLANE_SHADOW", {{GROUND_PLANE_VERT_SHADER, GROUND_PLANE_SHADOW_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"MAP_LIGHT", {{TEXTURE_DRAW_VERT_SHADER, MAP_LIGHT_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"RIBBON", {{RIBBON_VERT_SHADER, RIBBON_GEOM_SHADER, RIBBON_FRAG_SHADER}, DrawMode::IndexedLineStripAdjacency}});
+  registeredShaderPrograms.insert({"SLICE_PLANE", {{SLICE_PLANE_VERT_SHADER, SLICE_PLANE_FRAG_SHADER}, DrawMode::Triangles}});
+
+  registeredShaderPrograms.insert({"TEXTURE_DRAW_PLAIN", {{TEXTURE_DRAW_VERT_SHADER, PLAIN_TEXTURE_DRAW_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"TEXTURE_DRAW_DOT3", {{TEXTURE_DRAW_VERT_SHADER, DOT3_TEXTURE_DRAW_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"TEXTURE_DRAW_MAP3", {{TEXTURE_DRAW_VERT_SHADER, MAP3_TEXTURE_DRAW_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"TEXTURE_DRAW_SPHEREBG", {{SPHEREBG_DRAW_VERT_SHADER, SPHEREBG_DRAW_FRAG_SHADER}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"COMPOSITE_PEEL", {{TEXTURE_DRAW_VERT_SHADER, COMPOSITE_PEEL}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"DEPTH_COPY", {{TEXTURE_DRAW_VERT_SHADER, DEPTH_COPY}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"DEPTH_TO_MASK", {{TEXTURE_DRAW_VERT_SHADER, DEPTH_TO_MASK}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"SCALAR_TEXTURE_COLORMAP", {{TEXTURE_DRAW_VERT_SHADER, SCALAR_TEXTURE_COLORMAP}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"BLUR_RGB", {{TEXTURE_DRAW_VERT_SHADER, BLUR_RGB}, DrawMode::Triangles}});
+  registeredShaderPrograms.insert({"TRANSFORMATION_GIZMO_ROT", {{TRANSFORMATION_GIZMO_ROT_VERT, TRANSFORMATION_GIZMO_ROT_FRAG}, DrawMode::Triangles}});
+
+  // === Load rules
+
+  // Utility rules
+  registeredShaderRules.insert({"GLSL_VERSION", GLSL_VERSION});
+  registeredShaderRules.insert({"GLOBAL_FRAGMENT_FILTER", GLOBAL_FRAGMENT_FILTER});
+  registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_1", DOWNSAMPLE_RESOLVE_1});
+  registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_2", DOWNSAMPLE_RESOLVE_2});
+  registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_3", DOWNSAMPLE_RESOLVE_3});
+  registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_4", DOWNSAMPLE_RESOLVE_4});
+  
+  registeredShaderRules.insert({"TRANSPARENCY_STRUCTURE", TRANSPARENCY_STRUCTURE});
+  registeredShaderRules.insert({"TRANSPARENCY_RESOLVE_SIMPLE", TRANSPARENCY_RESOLVE_SIMPLE});
+  registeredShaderRules.insert({"TRANSPARENCY_PEEL_STRUCTURE", TRANSPARENCY_PEEL_STRUCTURE});
+  registeredShaderRules.insert({"TRANSPARENCY_PEEL_GROUND", TRANSPARENCY_PEEL_GROUND});
+  
+  registeredShaderRules.insert({"GENERATE_WORLD_POS", GENERATE_WORLD_POS});
+  registeredShaderRules.insert({"CULL_POS_FROM_WORLD", CULL_POS_FROM_WORLD});
+  registeredShaderRules.insert({"CULL_POS_FROM_ATTR", CULL_POS_FROM_ATTR});
+
+  // Lighting and shading things
+  registeredShaderRules.insert({"LIGHT_MATCAP", LIGHT_MATCAP});
+  registeredShaderRules.insert({"LIGHT_PASSTHRU", LIGHT_PASSTHRU});
+  registeredShaderRules.insert({"SHADE_BASECOLOR", SHADE_BASECOLOR});
+  registeredShaderRules.insert({"SHADE_COLOR", SHADE_COLOR});
+  registeredShaderRules.insert({"SHADE_COLORMAP_VALUE", SHADE_COLORMAP_VALUE});
+  registeredShaderRules.insert({"SHADE_COLORMAP_ANGULAR2", SHADE_COLORMAP_ANGULAR2});
+  registeredShaderRules.insert({"SHADE_GRID_VALUE2", SHADE_GRID_VALUE2});
+  registeredShaderRules.insert({"SHADE_CHECKER_VALUE2", SHADE_CHECKER_VALUE2});
+  registeredShaderRules.insert({"SHADEVALUE_MAG_VALUE2", SHADEVALUE_MAG_VALUE2});
+  registeredShaderRules.insert({"ISOLINE_STRIPE_VALUECOLOR", ISOLINE_STRIPE_VALUECOLOR});
+  registeredShaderRules.insert({"CHECKER_VALUE2COLOR", CHECKER_VALUE2COLOR});
+
+  // mesh things
+  registeredShaderRules.insert({"MESH_WIREFRAME", MESH_WIREFRAME});
+  registeredShaderRules.insert({"MESH_BACKFACE_NORMAL_FLIP", MESH_BACKFACE_NORMAL_FLIP});
+  registeredShaderRules.insert({"MESH_BACKFACE_DARKEN", MESH_BACKFACE_DARKEN});
+  registeredShaderRules.insert({"MESH_PROPAGATE_VALUE", MESH_PROPAGATE_VALUE});
+  registeredShaderRules.insert({"MESH_PROPAGATE_VALUE2", MESH_PROPAGATE_VALUE2});
+  registeredShaderRules.insert({"MESH_PROPAGATE_COLOR", MESH_PROPAGATE_COLOR});
+  registeredShaderRules.insert({"MESH_PROPAGATE_HALFEDGE_VALUE", MESH_PROPAGATE_HALFEDGE_VALUE});
+  registeredShaderRules.insert({"MESH_PROPAGATE_PICK", MESH_PROPAGATE_PICK});
+
+  // sphere things
+  registeredShaderRules.insert({"SPHERE_PROPAGATE_VALUE", SPHERE_PROPAGATE_VALUE});
+  registeredShaderRules.insert({"SPHERE_PROPAGATE_VALUE2", SPHERE_PROPAGATE_VALUE2});
+  registeredShaderRules.insert({"SPHERE_PROPAGATE_COLOR", SPHERE_PROPAGATE_COLOR});
+  registeredShaderRules.insert({"SPHERE_VARIABLE_SIZE", SPHERE_VARIABLE_SIZE});
+
+  // vector things
+  registeredShaderRules.insert({"VECTOR_PROPAGATE_COLOR", VECTOR_PROPAGATE_COLOR});
+  registeredShaderRules.insert({"TRANSFORMATION_GIZMO_VEC", TRANSFORMATION_GIZMO_VEC});
+
+  // cylinder things
+  registeredShaderRules.insert({"CYLINDER_PROPAGATE_VALUE", CYLINDER_PROPAGATE_VALUE});
+  registeredShaderRules.insert({"CYLINDER_PROPAGATE_BLEND_VALUE", CYLINDER_PROPAGATE_BLEND_VALUE});
+  registeredShaderRules.insert({"CYLINDER_PROPAGATE_COLOR", CYLINDER_PROPAGATE_COLOR});
+  registeredShaderRules.insert({"CYLINDER_PROPAGATE_BLEND_COLOR", CYLINDER_PROPAGATE_BLEND_COLOR});
+  registeredShaderRules.insert({"CYLINDER_PROPAGATE_PICK", CYLINDER_PROPAGATE_PICK});
+
+  // clang-format on
+};
+
+void GLEngine::createSlicePlaneFliterRule(std::string uniquePostfix) {
+  registeredShaderRules.insert({"SLICE_PLANE_CULL_" + uniquePostfix, generateSlicePlaneRule(uniquePostfix)});
 }
 
 

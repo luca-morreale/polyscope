@@ -26,6 +26,7 @@
 #include "examples/imgui_impl_glfw.h"
 #include "examples/imgui_impl_opengl3.h"
 
+#include <unordered_map>
 
 // Note: DO NOT include this header throughout polyscope, and do not directly make openGL calls. This header should only
 // be used to construct an instance of Engine. engine.h gives the render API, all render calls should pass through that.
@@ -57,7 +58,6 @@ public:
   // create a 2D texture from data
   GLTextureBuffer(TextureFormat format, unsigned int sizeX_, unsigned int sizeY_, unsigned char* data = nullptr);
   GLTextureBuffer(TextureFormat format, unsigned int sizeX_, unsigned int sizeY_, float* data);
-  GLTextureBuffer(TextureFormat format, unsigned int sizeX_, unsigned int sizeY_, unsigned int nSamples);
 
   ~GLTextureBuffer() override;
 
@@ -65,10 +65,13 @@ public:
   // Resize the underlying buffer (contents are lost)
   void resize(unsigned int newLen) override;
   void resize(unsigned int newX, unsigned int newY) override;
-  void resize(unsigned int newX, unsigned int newY, unsigned int nSamples) override;
 
   void setFilterMode(FilterMode newMode) override;
   void* getNativeHandle() override;
+  
+  std::vector<float> getDataScalar() override;
+  std::vector<glm::vec2> getDataVector2() override;
+  std::vector<glm::vec3> getDataVector3() override;
 
   void bind();
   GLenum textureType();
@@ -82,11 +85,9 @@ protected:
 class GLRenderBuffer : public RenderBuffer {
 public:
   GLRenderBuffer(RenderBufferType type, unsigned int sizeX_, unsigned int sizeY_);
-  GLRenderBuffer(RenderBufferType type, unsigned int sizeX_, unsigned int sizeY_, unsigned int nSamples);
   ~GLRenderBuffer() override;
 
   void resize(unsigned int newX, unsigned int newY) override;
-  void resize(unsigned int newX, unsigned int newY, unsigned int nSamples) override;
 
   void bind();
   RenderBufferHandle getHandle() const { return handle; }
@@ -119,8 +120,8 @@ public:
   void setDrawBuffers() override;
 
   // Query pixels
+  std::vector<unsigned char> readBuffer() override;
   std::array<float, 4> readFloat4(int xPos, int yPos) override;
-
   void blitTo(FrameBuffer* other) override;
 
   // Getters
@@ -155,6 +156,7 @@ public:
   // = Attributes
   // clang-format off
   bool hasAttribute(std::string name) override;
+  bool attributeIsSet(std::string name) override;
   void setAttribute(std::string name, const std::vector<glm::vec2>& data, bool update = false, int offset = 0, int size = -1) override;
   void setAttribute(std::string name, const std::vector<glm::vec3>& data, bool update = false, int offset = 0, int size = -1) override;
   void setAttribute(std::string name, const std::vector<glm::vec4>& data, bool update = false, int offset = 0, int size = -1) override;
@@ -177,6 +179,7 @@ public:
 
   // Textures
   bool hasTexture(std::string name) override;
+  bool textureIsSet(std::string name) override;
   void setTexture1D(std::string name, unsigned char* texData, unsigned int length) override;
   void setTexture2D(std::string name, unsigned char* texData, unsigned int width, unsigned int height,
                     bool withAlpha = true, bool useMipMap = false, bool repeat = false) override;
@@ -260,10 +263,12 @@ public:
   void setDepthMode(DepthMode newMode = DepthMode::Less) override;
   void setBlendMode(BlendMode newMode = BlendMode::Over) override;
   void setColorMask(std::array<bool, 4> mask = {true, true, true, true}) override;
+  void setBackfaceCull(bool newVal) override;
 
   // === Windowing and framework things
   void makeContextCurrent() override;
   void showWindow() override;
+  void hideWindow() override;
   void updateWindowSize(bool force = false) override;
   std::tuple<int, int> getWindowPos() override;
   bool windowRequestsClose() override;
@@ -289,29 +294,43 @@ public:
                                                        unsigned char* data = nullptr) override; // 2d
   std::shared_ptr<TextureBuffer> generateTextureBuffer(TextureFormat format, unsigned int sizeX_, unsigned int sizeY_,
                                                        float* data) override; // 2d
-  std::shared_ptr<TextureBuffer> generateTextureBufferMultisample(TextureFormat format, unsigned int sizeX_,
-                                                                  unsigned int sizeY_,
-                                                                  unsigned int nSamples) override; // 2d
 
   // create render buffers
   std::shared_ptr<RenderBuffer> generateRenderBuffer(RenderBufferType type, unsigned int sizeX_,
                                                      unsigned int sizeY_) override;
-  std::shared_ptr<RenderBuffer> generateRenderBufferMultisample(RenderBufferType type, unsigned int sizeX_,
-                                                                unsigned int sizeY_, unsigned int nSamples) override;
-
   // create frame buffers
   std::shared_ptr<FrameBuffer> generateFrameBuffer(unsigned int sizeX_, unsigned int sizeY_) override;
 
-  // create shader programs
-  std::shared_ptr<ShaderProgram> generateShaderProgram(const std::vector<ShaderStageSpecification>& stages, DrawMode dm,
-                                                       unsigned int nPatchVertices = 0) override;
+  // general flexible interface
+  std::shared_ptr<ShaderProgram>
+  requestShader(const std::string& programName, const std::vector<std::string>& customRules,
+                ShaderReplacementDefaults defaults = ShaderReplacementDefaults::SceneObject) override;
+
+  // === Implementation details
+
+  // Add a shader programs/rules so that they can be requested above
+  void registerShaderProgram(const std::string& name, const std::vector<ShaderStageSpecification>& stages);
+  void registerShaderRule(const std::string& name, const ShaderReplacementRule& rule);
+
+  // Transparency
+  virtual void applyTransparencySettings() override;
 
 protected:
   // Helpers
-
+  virtual void createSlicePlaneFliterRule(std::string name) override;
 
   // Internal windowing and engine details
   GLFWwindow* mainWindow = nullptr;
+
+  // Shader program & rule caches
+  // TODO oneday make these caches of precompiled programs which are shared, rather than caches of the sources
+  std::unordered_map<std::string, std::pair<std::vector<ShaderStageSpecification>, DrawMode>> registeredShaderPrograms;
+  std::unordered_map<std::string, ShaderReplacementRule> registeredShaderRules;
+  void populateDefaultShadersAndRules();
+  
+  std::shared_ptr<ShaderProgram> generateShaderProgram(const std::vector<ShaderStageSpecification>& stages,
+                                                       DrawMode dm) override;
+
 };
 
 } // namespace backend_openGL3_glfw

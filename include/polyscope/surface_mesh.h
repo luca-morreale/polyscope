@@ -35,7 +35,7 @@ class SurfaceVertexScalarQuantity;
 class SurfaceFaceScalarQuantity;
 class SurfaceEdgeScalarQuantity;
 class SurfaceHalfedgeScalarQuantity;
-class SurfaceDistanceQuantity;
+class SurfaceVertexScalarQuantity;
 class SurfaceCornerParameterizationQuantity;
 class SurfaceVertexParameterizationQuantity;
 class SurfaceVertexVectorQuantity;
@@ -85,6 +85,8 @@ public:
   virtual std::tuple<glm::vec3, glm::vec3> boundingBox() override;
   virtual std::string typeName() override;
 
+  virtual void refresh() override;
+
   // === Quantity-related
   // clang-format off
 
@@ -95,8 +97,8 @@ public:
   template <class T> SurfaceHalfedgeScalarQuantity* addHalfedgeScalarQuantity(std::string name, const T& data, DataType type = DataType::STANDARD);
 
   // = Distance (expect scalar array)
-  template <class T> SurfaceDistanceQuantity* addVertexDistanceQuantity(std::string name, const T& data);
-  template <class T> SurfaceDistanceQuantity* addVertexSignedDistanceQuantity(std::string name, const T& data);
+  template <class T> SurfaceVertexScalarQuantity* addVertexDistanceQuantity(std::string name, const T& data);
+  template <class T> SurfaceVertexScalarQuantity* addVertexSignedDistanceQuantity(std::string name, const T& data);
 
   // = Colors (expect vec3 array)
   template <class T> SurfaceVertexColorQuantity* addVertexColorQuantity(std::string name, const T& data);
@@ -191,7 +193,6 @@ public:
 
 
   // === Helpers
-  void fillGeometryBuffers(render::ShaderProgram& p);
   void setShadeStyle(ShadeStyle newShadeStyle);
 
 
@@ -244,8 +245,12 @@ public:
   glm::vec3 faceCenter(size_t iF);
 
   // if there are no tangent spaces, builds the default ones
-  void ensureHaveFaceTangentSpaces();
-  void ensureHaveVertexTangentSpaces();
+  bool hasFaceTangentSpaces();
+  bool hasVertexTangentSpaces();
+  void ensureHaveFaceTangentSpaces();   // sanity-check which errors if not present
+  void ensureHaveVertexTangentSpaces(); // sanity-check which errors if not present
+  void generateDefaultFaceTangentSpaces();
+  void generateDefaultVertexTangentSpaces();
 
   // Set tangent space coordinates for vertices
   template <class T>
@@ -294,6 +299,15 @@ public:
   SurfaceMesh* setEdgeWidth(double newVal);
   double getEdgeWidth();
 
+  // Backface policy
+  SurfaceMesh* setBackfacePolicy(BackfacePolicy newPolicy);
+  BackfacePolicy getBackfacePolicy();
+
+  // Rendering helpers used by quantities
+  std::vector<std::string> addStructureRules(std::vector<std::string> initRules);
+  void setStructureUniforms(render::ShaderProgram& p);
+  void fillGeometryBuffers(render::ShaderProgram& p);
+
 private:
   // Visualization settings
   PersistentValue<bool> shadeSmooth;
@@ -301,11 +315,11 @@ private:
   PersistentValue<glm::vec3> edgeColor;
   PersistentValue<std::string> material;
   PersistentValue<float> edgeWidth;
+  PersistentValue<BackfacePolicy> backfacePolicy;
 
   // Do setup work related to drawing, including allocating openGL data
   void prepare();
   void preparePick();
-  void prepareWireframe();
   void geometryChanged(); // call whenever geometry changed
 
   // Picking-related
@@ -323,7 +337,6 @@ private:
   // Drawing related things
   std::shared_ptr<render::ShaderProgram> program;
   std::shared_ptr<render::ShaderProgram> pickProgram;
-  std::shared_ptr<render::ShaderProgram> wireframeProgram;
 
 
   // === Helper functions
@@ -333,7 +346,6 @@ private:
 
   void fillGeometryBuffersSmooth(render::ShaderProgram& p);
   void fillGeometryBuffersFlat(render::ShaderProgram& p);
-  void fillGeometryBuffersWireframe(render::ShaderProgram& p);
   glm::vec2 projectToScreenSpace(glm::vec3 coord);
   // bool screenSpaceTriangleTest(size_t fInd, glm::vec2 testCoords, glm::vec3& bCoordOut);
 
@@ -348,8 +360,8 @@ private:
   SurfaceFaceScalarQuantity* addFaceScalarQuantityImpl(std::string name, const std::vector<double>& data, DataType type);
   SurfaceEdgeScalarQuantity* addEdgeScalarQuantityImpl(std::string name, const std::vector<double>& data, DataType type);
   SurfaceHalfedgeScalarQuantity* addHalfedgeScalarQuantityImpl(std::string name, const std::vector<double>& data, DataType type);
-  SurfaceDistanceQuantity* addVertexDistanceQuantityImpl(std::string name, const std::vector<double>& data);
-  SurfaceDistanceQuantity* addVertexSignedDistanceQuantityImpl(std::string name, const std::vector<double>& data);
+  SurfaceVertexScalarQuantity* addVertexDistanceQuantityImpl(std::string name, const std::vector<double>& data);
+  SurfaceVertexScalarQuantity* addVertexSignedDistanceQuantityImpl(std::string name, const std::vector<double>& data);
   SurfaceCornerParameterizationQuantity* addParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& coords, ParamCoordsType type);
   SurfaceVertexParameterizationQuantity* addVertexParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& coords, ParamCoordsType type);
   SurfaceVertexParameterizationQuantity* addLocalParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& coords, ParamCoordsType type);
@@ -376,7 +388,8 @@ SurfaceMesh* registerSurfaceMesh(std::string name, const V& vertexPositions, con
 template <class V, class F>
 SurfaceMesh* registerSurfaceMesh2D(std::string name, const V& vertexPositions, const F& faceIndices);
 template <class V, class F, class P>
-SurfaceMesh* registerSurfaceMesh(std::string name, const V& vertexPositions, const F& faceIndices, const std::array<std::pair<P, size_t>, 5>& perms);
+SurfaceMesh* registerSurfaceMesh(std::string name, const V& vertexPositions, const F& faceIndices,
+                                 const std::array<std::pair<P, size_t>, 5>& perms);
 
 
 // Shorthand to get a mesh from polyscope

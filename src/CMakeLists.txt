@@ -25,12 +25,15 @@ if("${POLYSCOPE_BACKEND_OPENGL3_GLFW}")
 		render/opengl/shaders/texture_draw_shaders.cpp
 		render/opengl/shaders/lighting_shaders.cpp
 		render/opengl/shaders/ground_plane_shaders.cpp
+		render/opengl/shaders/gizmo_shaders.cpp
 		render/opengl/shaders/histogram_shaders.cpp
 		render/opengl/shaders/surface_mesh_shaders.cpp
 		render/opengl/shaders/vector_shaders.cpp
 		render/opengl/shaders/sphere_shaders.cpp
 		render/opengl/shaders/ribbon_shaders.cpp
 		render/opengl/shaders/cylinder_shaders.cpp
+		render/opengl/shaders/rules.cpp
+		render/opengl/shaders/common.cpp
 	)
 
   list(APPEND BACKEND_HEADERS
@@ -73,12 +76,15 @@ if("${POLYSCOPE_BACKEND_OPENGL_MOCK}")
 		render/opengl/shaders/texture_draw_shaders.cpp
 		render/opengl/shaders/lighting_shaders.cpp
 		render/opengl/shaders/ground_plane_shaders.cpp
+		render/opengl/shaders/gizmo_shaders.cpp
 		render/opengl/shaders/histogram_shaders.cpp
 		render/opengl/shaders/surface_mesh_shaders.cpp
 		render/opengl/shaders/vector_shaders.cpp
 		render/opengl/shaders/sphere_shaders.cpp
 		render/opengl/shaders/ribbon_shaders.cpp
 		render/opengl/shaders/cylinder_shaders.cpp
+		render/opengl/shaders/rules.cpp
+		render/opengl/shaders/common.cpp
 	)
 
   list(APPEND BACKEND_HEADERS
@@ -101,12 +107,15 @@ SET(SRCS
 
   # Core functionality
   polyscope.cpp
-	screenshot.cpp
+  options.cpp
+  state.cpp
   structure.cpp
   utilities.cpp
   view.cpp
+	screenshot.cpp
   messages.cpp
   pick.cpp
+  widget.cpp
 
 	# Rendering stuff
   render/engine.cpp
@@ -114,6 +123,7 @@ SET(SRCS
   render/ground_plane.cpp
   render/materials.cpp
   render/initialize_backend.cpp
+  render/shader_builder.cpp
 
   # General utilities
   disjoint_sets.cpp
@@ -122,6 +132,8 @@ SET(SRCS
   histogram.cpp
   persistent_value.cpp
   color_management.cpp
+  transformation_gizmo.cpp
+  slice_plane.cpp
 
   ## Structures
 
@@ -130,6 +142,7 @@ SET(SRCS
 	point_cloud_color_quantity.cpp
 	point_cloud_scalar_quantity.cpp
 	point_cloud_vector_quantity.cpp
+	point_cloud_parameterization_quantity.cpp
 
   # Surface
   surface_mesh.cpp
@@ -152,8 +165,10 @@ SET(SRCS
 	curve_network_vector_quantity.cpp
 
   # Rendering utilities
+	vector_artist.cpp
 	trace_vector_field.cpp
 	ribbon_artist.cpp
+	image_scalar_artist.cpp
 
 	## Embedded binary data
   render/bindata/bindata_font_cousine_regular.cpp
@@ -187,6 +202,7 @@ SET(HEADERS
 	${INCLUDE_ROOT}/disjoint_sets.h
 	${INCLUDE_ROOT}/file_helpers.h
 	${INCLUDE_ROOT}/histogram.h
+	${INCLUDE_ROOT}/image_scalar_artist.h
 	${INCLUDE_ROOT}/messages.h
 	${INCLUDE_ROOT}/options.h
 	${INCLUDE_ROOT}/persistent_value.h
@@ -197,6 +213,7 @@ SET(HEADERS
 	${INCLUDE_ROOT}/point_cloud_color_quantity.h
 	${INCLUDE_ROOT}/point_cloud_quantity.h
 	${INCLUDE_ROOT}/point_cloud_scalar_quantity.h
+	${INCLUDE_ROOT}/point_cloud_parameterization_quantity.h
 	${INCLUDE_ROOT}/point_cloud_vector_quantity.h
 	${INCLUDE_ROOT}/polyscope.h
 	${INCLUDE_ROOT}/quantity.h
@@ -207,10 +224,10 @@ SET(HEADERS
 	${INCLUDE_ROOT}/render/ground_plane.h
 	${INCLUDE_ROOT}/render/material_defs.h
 	${INCLUDE_ROOT}/render/materials.h
-	${INCLUDE_ROOT}/render/shaders.h
 	${INCLUDE_ROOT}/ribbon_artist.h
 	${INCLUDE_ROOT}/scaled_value.h
 	${INCLUDE_ROOT}/screenshot.h
+    ${INCLUDE_ROOT}/slice_plane.h
 	${INCLUDE_ROOT}/standardize_data_array.h
 	${INCLUDE_ROOT}/structure.h
 	${INCLUDE_ROOT}/structure.ipp
@@ -246,12 +263,13 @@ add_definitions(-DNOMINMAX)
 
 # Include settings
 target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../include")
-target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/args")
 target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/glm")
-target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/happly")
-target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/json/include")
-target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/stb")
-target_include_directories(polyscope PUBLIC "${BACKEND_INCLUDE_DIRS}")
+#target_include_directories(polyscope PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../deps/args") # not used, polyscope generates no apps directly
+target_include_directories(polyscope PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../deps/happly")
+target_include_directories(polyscope PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../deps/json/include")
+target_include_directories(polyscope PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../deps/stb")
+target_include_directories(polyscope PRIVATE "${BACKEND_INCLUDE_DIRS}")
 
 # Link settings
-target_link_libraries(polyscope "${BACKEND_LIBS}" imgui stb)
+target_link_libraries(polyscope PUBLIC imgui)
+target_link_libraries(polyscope PRIVATE "${BACKEND_LIBS}" stb)

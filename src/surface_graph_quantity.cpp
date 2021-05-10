@@ -3,7 +3,6 @@
 
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
-#include "polyscope/render/shaders.h"
 #include "polyscope/utilities.h"
 
 #include "imgui.h"
@@ -65,19 +64,13 @@ void SurfaceGraphQuantity::setUniforms() {
 void SurfaceGraphQuantity::createPrograms() {
 
   { // Point program
-    pointProgram = render::engine->generateShaderProgram(
-        {render::SPHERE_VERT_SHADER, render::SPHERE_BILLBOARD_GEOM_SHADER, render::SPHERE_BILLBOARD_FRAG_SHADER},
-        DrawMode::Points);
-
+    pointProgram = render::engine->requestShader("RAYCAST_SPHERE", {"SHADE_BASECOLOR"});
     pointProgram->setAttribute("a_position", nodes);
     render::engine->setMaterial(*pointProgram, parent.getMaterial());
   }
 
   { // Line program
-
-    lineProgram = render::engine->generateShaderProgram(
-        {render::PASSTHRU_CYLINDER_VERT_SHADER, render::CYLINDER_GEOM_SHADER, render::CYLINDER_FRAG_SHADER},
-        DrawMode::Points);
+    lineProgram = render::engine->requestShader("RAYCAST_CYLINDER", {"SHADE_BASECOLOR"});
 
     // Build buffers
     std::vector<glm::vec3> edgeStarts, edgeEnds;
@@ -107,6 +100,12 @@ void SurfaceGraphQuantity::buildCustomUI() {
 }
 
 std::string SurfaceGraphQuantity::niceName() { return name; }
+
+void SurfaceGraphQuantity::refresh() {
+  pointProgram.reset();
+  lineProgram.reset();
+  Quantity::refresh();
+}
 
 SurfaceGraphQuantity* SurfaceGraphQuantity::setRadius(double newVal, bool isRelative) {
   radius = ScaledValue<float>(newVal, isRelative);

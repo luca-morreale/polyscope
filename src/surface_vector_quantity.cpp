@@ -4,7 +4,6 @@
 #include "polyscope/file_helpers.h"
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
-#include "polyscope/render/shaders.h"
 #include "polyscope/trace_vector_field.h"
 
 #include "imgui.h"
@@ -21,137 +20,47 @@ namespace polyscope {
 SurfaceVectorQuantity::SurfaceVectorQuantity(std::string name, SurfaceMesh& mesh_, MeshElement definedOn_,
                                              VectorType vectorType_)
     : SurfaceMeshQuantity(name, mesh_), vectorType(vectorType_),
-      vectorLengthMult(uniquePrefix() + name + "#vectorLengthMult",
-                       vectorType == VectorType::AMBIENT ? absoluteValue(1.0) : relativeValue(0.02)),
-      vectorRadius(uniquePrefix() + name + "#vectorRadius", relativeValue(0.0025)),
-      vectorColor(uniquePrefix() + "#vectorColor", getNextUniqueColor()),
-      material(uniquePrefix() + "#material", "clay"), definedOn(definedOn_),
       ribbonEnabled(uniquePrefix() + "#ribbonEnabled", false) {}
 
-void SurfaceVectorQuantity::prepareVectorMapper() {
 
-  // Create a mapper (default mapper is identity)
-  if (vectorType == VectorType::AMBIENT) {
-    mapper.setMinMax(vectors);
-  } else {
-    mapper = AffineRemapper<glm::vec3>(vectors, DataType::MAGNITUDE);
-  }
+void SurfaceVectorQuantity::prepareVectorArtist() {
+  vectorArtist.reset(new VectorArtist(parent, name + "#vectorartist", vectorRoots, vectors, vectorType));
 }
 
 void SurfaceVectorQuantity::draw() {
   if (!isEnabled()) return;
-
-  if (program == nullptr) prepareProgram();
-
-  // Set uniforms
-  parent.setTransformUniforms(*program);
-
-  program->setUniform("u_radius", getVectorRadius());
-  program->setUniform("u_baseColor", getVectorColor());
-
-  if (vectorType == VectorType::AMBIENT) {
-    program->setUniform("u_lengthMult", 1.0);
-  } else {
-    program->setUniform("u_lengthMult", getVectorLengthScale());
-  }
-  
-	glm::mat4 P = view::getCameraPerspectiveMatrix();
-  glm::mat4 Pinv = glm::inverse(P);
-  program->setUniform("u_invProjMatrix", glm::value_ptr(Pinv));
- 	program->setUniform("u_viewport", render::engine->getCurrentViewport());
-
-  program->draw();
-}
-
-void SurfaceVectorQuantity::prepareProgram() {
-
-  program = render::engine->generateShaderProgram(
-      {render::PASSTHRU_VECTOR_VERT_SHADER, render::VECTOR_GEOM_SHADER, render::VECTOR_FRAG_SHADER}, DrawMode::Points);
-
-  // Fill buffers
-  std::vector<glm::vec3> mappedVectors;
-  for (glm::vec3& v : vectors) {
-    mappedVectors.push_back(mapper.map(v));
-  }
-
-  program->setAttribute("a_vector", mappedVectors);
-  program->setAttribute("a_position", vectorRoots);
-
-  render::engine->setMaterial(*program, getMaterial());
+  vectorArtist->draw();
 }
 
 void SurfaceVectorQuantity::buildCustomUI() {
   ImGui::SameLine();
-  if (ImGui::ColorEdit3("Color", &vectorColor.get()[0], ImGuiColorEditFlags_NoInputs)) {
-    setVectorColor(getVectorColor());
-  }
-  ImGui::SameLine();
-
-
-  // === Options popup
-  if (ImGui::Button("Options")) {
-    ImGui::OpenPopup("OptionsPopup");
-  }
-  if (ImGui::BeginPopup("OptionsPopup")) {
-    if (render::buildMaterialOptionsGui(material.get())) {
-      material.manuallyChanged();
-      setMaterial(material.get()); // trigger the other updates that happen on set()
-    }
-    ImGui::EndPopup();
-  }
-
-
-  // Only get to set length for non-ambient vectors
-  if (vectorType != VectorType::AMBIENT) {
-    if (ImGui::SliderFloat("Length", vectorLengthMult.get().getValuePtr(), 0.0, .1, "%.5f", 3.)) {
-      vectorLengthMult.manuallyChanged();
-      requestRedraw();
-    }
-  }
-
-  if (ImGui::SliderFloat("Radius", vectorRadius.get().getValuePtr(), 0.0, .1, "%.5f", 3.)) {
-    vectorRadius.manuallyChanged();
-    requestRedraw();
-  }
-
-  { // Draw max and min magnitude
-    ImGui::TextUnformatted(mapper.printBounds().c_str());
-  }
-
+  vectorArtist->buildParametersUI();
   drawSubUI();
 }
 
 void SurfaceVectorQuantity::drawSubUI() {}
 
 SurfaceVectorQuantity* SurfaceVectorQuantity::setVectorLengthScale(double newLength, bool isRelative) {
-  vectorLengthMult = ScaledValue<double>(newLength, isRelative);
-  requestRedraw();
+  vectorArtist->setVectorLengthScale(newLength, isRelative);
   return this;
 }
-double SurfaceVectorQuantity::getVectorLengthScale() { return vectorLengthMult.get().asAbsolute(); }
-
+double SurfaceVectorQuantity::getVectorLengthScale() { return vectorArtist->getVectorLengthScale(); }
 SurfaceVectorQuantity* SurfaceVectorQuantity::setVectorRadius(double val, bool isRelative) {
-  vectorRadius = ScaledValue<double>(val, isRelative);
-  requestRedraw();
+  vectorArtist->setVectorRadius(val, isRelative);
   return this;
 }
-double SurfaceVectorQuantity::getVectorRadius() { return vectorRadius.get().asAbsolute(); }
-
+double SurfaceVectorQuantity::getVectorRadius() { return vectorArtist->getVectorRadius(); }
 SurfaceVectorQuantity* SurfaceVectorQuantity::setVectorColor(glm::vec3 color) {
-  vectorColor = color;
-  requestRedraw();
+  vectorArtist->setVectorColor(color);
   return this;
 }
-glm::vec3 SurfaceVectorQuantity::getVectorColor() { return vectorColor.get(); }
+glm::vec3 SurfaceVectorQuantity::getVectorColor() { return vectorArtist->getVectorColor(); }
 
 SurfaceVectorQuantity* SurfaceVectorQuantity::setMaterial(std::string m) {
-  material = m;
-  if (program) render::engine->setMaterial(*program, getMaterial());
-  if (ribbonArtist && ribbonArtist->program) render::engine->setMaterial(*ribbonArtist->program, material.get());
-  requestRedraw();
+  vectorArtist->setMaterial(m);
   return this;
 }
-std::string SurfaceVectorQuantity::getMaterial() { return material.get(); }
+std::string SurfaceVectorQuantity::getMaterial() { return vectorArtist->getMaterial(); }
 
 SurfaceVectorQuantity* SurfaceVectorQuantity::setRibbonEnabled(bool val) {
   ribbonEnabled = val;
@@ -160,6 +69,32 @@ SurfaceVectorQuantity* SurfaceVectorQuantity::setRibbonEnabled(bool val) {
 }
 bool SurfaceVectorQuantity::isRibbonEnabled() { return ribbonEnabled.get(); }
 
+SurfaceVectorQuantity* SurfaceVectorQuantity::setRibbonWidth(double val, bool isRelative) {
+  if (ribbonArtist) {
+    ribbonArtist->setWidth(val, isRelative);
+  }
+  return this;
+}
+double SurfaceVectorQuantity::getRibbonWidth() {
+  if (ribbonArtist) {
+    return ribbonArtist->getWidth();
+  }
+  return -1;
+}
+
+SurfaceVectorQuantity* SurfaceVectorQuantity::setRibbonMaterial(std::string name) {
+  if (ribbonArtist) {
+    ribbonArtist->setMaterial(name);
+  }
+  return this;
+}
+std::string SurfaceVectorQuantity::getRibbonMaterial() {
+  if (ribbonArtist) {
+    return ribbonArtist->getMaterial();
+  }
+  return "";
+}
+
 // ========================================================
 // ==========           Vertex Vector            ==========
 // ========================================================
@@ -167,13 +102,14 @@ bool SurfaceVectorQuantity::isRibbonEnabled() { return ribbonEnabled.get(); }
 SurfaceVertexVectorQuantity::SurfaceVertexVectorQuantity(std::string name, std::vector<glm::vec3> vectors_,
                                                          SurfaceMesh& mesh_, VectorType vectorType_)
 
-    : SurfaceVectorQuantity(name, mesh_, MeshElement::VERTEX, vectorType_), vectorField(vectors_) {
+    : SurfaceVectorQuantity(name, mesh_, MeshElement::VERTEX, vectorType_) {
+  vectors = vectors_;
+  refresh();
+}
 
-  size_t i = 0;
+void SurfaceVertexVectorQuantity::refresh() {
   vectorRoots = parent.vertices;
-  vectors = vectorField;
-
-  prepareVectorMapper();
+  prepareVectorArtist();
 }
 
 void SurfaceVertexVectorQuantity::buildVertexInfoGUI(size_t iV) {
@@ -181,12 +117,12 @@ void SurfaceVertexVectorQuantity::buildVertexInfoGUI(size_t iV) {
   ImGui::NextColumn();
 
   std::stringstream buffer;
-  buffer << vectorField[iV];
+  buffer << vectors[iV];
   ImGui::TextUnformatted(buffer.str().c_str());
 
   ImGui::NextColumn();
   ImGui::NextColumn();
-  ImGui::Text("magnitude: %g", glm::length(vectorField[iV]));
+  ImGui::Text("magnitude: %g", glm::length(vectors[iV]));
   ImGui::NextColumn();
 }
 
@@ -198,19 +134,17 @@ std::string SurfaceVertexVectorQuantity::niceName() { return name + " (vertex ve
 
 SurfaceFaceVectorQuantity::SurfaceFaceVectorQuantity(std::string name, std::vector<glm::vec3> vectors_,
                                                      SurfaceMesh& mesh_, VectorType vectorType_)
-    : SurfaceVectorQuantity(name, mesh_, MeshElement::FACE, vectorType_), vectorField(vectors_) {
+    : SurfaceVectorQuantity(name, mesh_, MeshElement::FACE, vectorType_) {
+  vectors = vectors_;
+  refresh();
+}
 
-  // Copy the vectors
-  vectors = vectorField;
+void SurfaceFaceVectorQuantity::refresh() {
   vectorRoots.resize(parent.nFaces());
   for (size_t iF = 0; iF < parent.nFaces(); iF++) {
-    auto& face = parent.faces[iF];
-    size_t D = face.size();
-    glm::vec3 faceCenter = parent.faceCenter(iF);
-    vectorRoots[iF] = faceCenter;
+    vectorRoots[iF] = parent.faceCenter(iF);
   }
-
-  prepareVectorMapper();
+  prepareVectorArtist();
 }
 
 void SurfaceFaceVectorQuantity::buildFaceInfoGUI(size_t iF) {
@@ -218,12 +152,12 @@ void SurfaceFaceVectorQuantity::buildFaceInfoGUI(size_t iF) {
   ImGui::NextColumn();
 
   std::stringstream buffer;
-  buffer << vectorField[iF];
+  buffer << vectors[iF];
   ImGui::TextUnformatted(buffer.str().c_str());
 
   ImGui::NextColumn();
   ImGui::NextColumn();
-  ImGui::Text("magnitude: %g", glm::length(vectorField[iF]));
+  ImGui::Text("magnitude: %g", glm::length(vectors[iF]));
   ImGui::NextColumn();
 }
 
@@ -239,13 +173,18 @@ SurfaceFaceIntrinsicVectorQuantity::SurfaceFaceIntrinsicVectorQuantity(std::stri
                                                                        SurfaceMesh& mesh_, int nSym_,
                                                                        VectorType vectorType_)
     : SurfaceVectorQuantity(name, mesh_, MeshElement::FACE, vectorType_), nSym(nSym_), vectorField(vectors_) {
+  refresh();
+}
 
+void SurfaceFaceIntrinsicVectorQuantity::refresh() {
   parent.ensureHaveFaceTangentSpaces();
 
   double rotAngle = 2.0 * PI / nSym;
   Complex rot = std::exp(Complex(0, 1) * rotAngle);
 
   // Copy the vectors
+  vectors.clear();
+  vectorRoots.clear();
   for (size_t iF = 0; iF < parent.nFaces(); iF++) {
 
     glm::vec3 normal = parent.faceNormals[iF];
@@ -270,7 +209,8 @@ SurfaceFaceIntrinsicVectorQuantity::SurfaceFaceIntrinsicVectorQuantity(std::stri
     }
   }
 
-  prepareVectorMapper();
+  prepareVectorArtist();
+  ribbonArtist.reset();
 }
 
 void SurfaceFaceIntrinsicVectorQuantity::buildFaceInfoGUI(size_t iF) {
@@ -296,11 +236,9 @@ void SurfaceFaceIntrinsicVectorQuantity::draw() {
     if (ribbonArtist == nullptr) {
       // Warning: expensive... Creates noticeable UI lag
       ribbonArtist.reset(new RibbonArtist(parent, traceField(parent, vectorField, nSym, 2500)));
-      render::engine->setMaterial(*ribbonArtist->program, material.get());
     }
 
     // Update transform matrix from parent
-    ribbonArtist->objectTransform = parent.objectTransform;
     ribbonArtist->draw();
   }
 }
@@ -309,6 +247,7 @@ void SurfaceFaceIntrinsicVectorQuantity::drawSubUI() {
 
   if (ImGui::Checkbox("Draw ribbon", &ribbonEnabled.get())) setRibbonEnabled(isRibbonEnabled());
   if (ribbonEnabled.get() && ribbonArtist != nullptr) {
+    ImGui::SameLine();
     ribbonArtist->buildParametersGUI();
   }
 }
@@ -325,13 +264,18 @@ SurfaceVertexIntrinsicVectorQuantity::SurfaceVertexIntrinsicVectorQuantity(std::
                                                                            SurfaceMesh& mesh_, int nSym_,
                                                                            VectorType vectorType_)
     : SurfaceVectorQuantity(name, mesh_, MeshElement::VERTEX, vectorType_), nSym(nSym_), vectorField(vectors_) {
+  refresh();
+}
 
+void SurfaceVertexIntrinsicVectorQuantity::refresh() {
   parent.ensureHaveVertexTangentSpaces();
 
   double rotAngle = 2.0 * PI / nSym;
   Complex rot = std::exp(Complex(0, 1) * rotAngle);
 
   // Copy the vectors
+  vectors.clear();
+  vectorRoots.clear();
   for (size_t iV = 0; iV < parent.nVertices(); iV++) {
 
     glm::vec3 normal = parent.vertexNormals[iV];
@@ -351,7 +295,8 @@ SurfaceVertexIntrinsicVectorQuantity::SurfaceVertexIntrinsicVectorQuantity(std::
     }
   }
 
-  prepareVectorMapper();
+  prepareVectorArtist();
+  ribbonArtist.reset();
 }
 
 void SurfaceVertexIntrinsicVectorQuantity::buildVertexInfoGUI(size_t iV) {
@@ -377,7 +322,15 @@ void SurfaceVertexIntrinsicVectorQuantity::draw() {
     if (ribbonArtist == nullptr) {
 
       // Remap to center of each face (extrinsically)
+
+      // Generate default tangent spaces if necessary
+      if (!parent.hasFaceTangentSpaces()) {
+        // TODO this could technically cause a problem if the user tries to register some other tangent spaces after
+        // enabling the ribbon. This should really be an entirely internal implementation detail.
+        parent.generateDefaultFaceTangentSpaces();
+      }
       parent.ensureHaveFaceTangentSpaces();
+
       parent.ensureHaveVertexTangentSpaces();
       std::vector<glm::vec2> unitFaceVecs(parent.nFaces());
       for (size_t iF = 0; iF < parent.nFaces(); iF++) {
@@ -407,11 +360,9 @@ void SurfaceVertexIntrinsicVectorQuantity::draw() {
 
       // Warning: expensive... Creates noticeable UI lag
       ribbonArtist.reset(new RibbonArtist(parent, traceField(parent, unitFaceVecs, nSym, 2500)));
-      render::engine->setMaterial(*ribbonArtist->program, material.get());
     }
 
     // Update transform matrix from parent
-    ribbonArtist->objectTransform = parent.objectTransform;
     ribbonArtist->draw();
   }
 }
@@ -420,6 +371,7 @@ void SurfaceVertexIntrinsicVectorQuantity::drawSubUI() {
 
   if (ImGui::Checkbox("Draw ribbon", &ribbonEnabled.get())) setRibbonEnabled(isRibbonEnabled());
   if (ribbonEnabled.get() && ribbonArtist != nullptr) {
+    ImGui::SameLine();
     ribbonArtist->buildParametersGUI();
   }
 }
@@ -435,14 +387,25 @@ SurfaceOneFormIntrinsicVectorQuantity::SurfaceOneFormIntrinsicVectorQuantity(std
                                                                              std::vector<double> oneForm_,
                                                                              std::vector<char> canonicalOrientation_,
                                                                              SurfaceMesh& mesh_)
-    : SurfaceVectorQuantity(name, mesh_, MeshElement::FACE, VectorType::STANDARD), oneForm(oneForm_) {
+    : SurfaceVectorQuantity(name, mesh_, MeshElement::FACE, VectorType::STANDARD), oneForm(oneForm_),
+      canonicalOrientation(canonicalOrientation_) {
+  refresh();
+}
 
+void SurfaceOneFormIntrinsicVectorQuantity::refresh() {
+
+  // If the parent doesn't have face tangent spaces, auto-generate them
+  // (since the user shouldn't have to think about face tangent spaces to specify a 1-form)
+  if (!parent.hasFaceTangentSpaces()) {
+    parent.generateDefaultFaceTangentSpaces();
+  }
+
+  parent.ensureHaveFaceTangentSpaces();
   vectorRoots = std::vector<glm::vec3>(parent.nFaces(), glm::vec3{0., 0., 0.});
   vectors = std::vector<glm::vec3>(parent.nFaces(), glm::vec3{0., 0., 0.});
   mappedVectorField = std::vector<glm::vec2>(parent.nFaces(), glm::vec3{0., 0., 0.});
 
   // Remap to faces
-  parent.ensureHaveFaceTangentSpaces();
   for (size_t iF = 0; iF < parent.nFaces(); iF++) {
     auto& face = parent.faces[iF];
     size_t D = face.size();
@@ -466,9 +429,9 @@ SurfaceOneFormIntrinsicVectorQuantity::SurfaceOneFormIntrinsicVectorQuantity(std
 
       bool isCanonicalOriented;
       if (parent.vertexPerm.size() > 0) {
-        isCanonicalOriented = ((parent.vertexPerm[vB] > parent.vertexPerm[vA]) != canonicalOrientation_[iE]);
+        isCanonicalOriented = ((parent.vertexPerm[vB] > parent.vertexPerm[vA]) != canonicalOrientation[iE]);
       } else {
-        isCanonicalOriented = ((vB > vA) != canonicalOrientation_[iE]);
+        isCanonicalOriented = ((vB > vA) != canonicalOrientation[iE]);
       }
       double orientationSign = isCanonicalOriented ? 1. : -1.;
 
@@ -494,7 +457,8 @@ SurfaceOneFormIntrinsicVectorQuantity::SurfaceOneFormIntrinsicVectorQuantity(std
     vectors[iF] = result;
   }
 
-  prepareVectorMapper();
+  prepareVectorArtist();
+  ribbonArtist.reset();
 }
 
 void SurfaceOneFormIntrinsicVectorQuantity::buildEdgeInfoGUI(size_t iE) {
@@ -507,7 +471,7 @@ void SurfaceOneFormIntrinsicVectorQuantity::buildEdgeInfoGUI(size_t iE) {
 }
 
 void SurfaceOneFormIntrinsicVectorQuantity::buildFaceInfoGUI(size_t iF) {
-  ImGui::TextUnformatted((name + "(remapped)").c_str());
+  ImGui::TextUnformatted((name + " (remapped)").c_str());
   ImGui::NextColumn();
 
   std::stringstream buffer;
@@ -534,12 +498,10 @@ void SurfaceOneFormIntrinsicVectorQuantity::draw() {
       }
       // Warning: expensive... Creates noticeable UI lag
       ribbonArtist.reset(new RibbonArtist(parent, traceField(parent, unitMappedField, 1, 2500)));
-      render::engine->setMaterial(*ribbonArtist->program, material.get());
     }
 
 
     // Update transform matrix from parent
-    ribbonArtist->objectTransform = parent.objectTransform;
     ribbonArtist->draw();
   }
 }
@@ -548,6 +510,7 @@ void SurfaceOneFormIntrinsicVectorQuantity::drawSubUI() {
 
   if (ImGui::Checkbox("Draw ribbon", &ribbonEnabled.get())) setRibbonEnabled(isRibbonEnabled());
   if (ribbonEnabled.get() && ribbonArtist != nullptr) {
+    ImGui::SameLine();
     ribbonArtist->buildParametersGUI();
   }
 }

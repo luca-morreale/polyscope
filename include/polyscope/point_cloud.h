@@ -12,6 +12,7 @@
 #include "polyscope/structure.h"
 
 #include "polyscope/point_cloud_color_quantity.h"
+#include "polyscope/point_cloud_parameterization_quantity.h"
 #include "polyscope/point_cloud_scalar_quantity.h"
 #include "polyscope/point_cloud_vector_quantity.h"
 
@@ -25,6 +26,7 @@ class PointCloud;
 // Forward declare quantity types
 class PointCloudColorQuantity;
 class PointCloudScalarQuantity;
+class PointCloudParameterizationQuantity;
 class PointCloudVectorQuantity;
 
 
@@ -53,12 +55,21 @@ public:
   virtual double lengthScale() override;
   virtual std::tuple<glm::vec3, glm::vec3> boundingBox() override;
   virtual std::string typeName() override;
+  virtual void refresh() override;
 
   // === Quantities
 
   // Scalars
   template <class T>
   PointCloudScalarQuantity* addScalarQuantity(std::string name, const T& values, DataType type = DataType::STANDARD);
+
+  // Parameterization
+  template <class T>
+  PointCloudParameterizationQuantity* addParameterizationQuantity(std::string name, const T& values,
+                                                                  ParamCoordsType type = ParamCoordsType::UNIT);
+  template <class T>
+  PointCloudParameterizationQuantity* addLocalParameterizationQuantity(std::string name, const T& values,
+                                                                       ParamCoordsType type = ParamCoordsType::WORLD);
 
   // Colors
   template <class T>
@@ -78,6 +89,14 @@ public:
   template <class V>
   void updatePointPositions2D(const V& newPositions);
 
+  // === Set point size from a scalar quantity
+  // effect is multiplicative with pointRadius
+  // negative values are always clamped to 0
+  // if autoScale==true, values are rescaled such that the largest has size pointRadius
+  void setPointRadiusQuantity(PointCloudScalarQuantity* quantity, bool autoScale = true);
+  void setPointRadiusQuantity(std::string name, bool autoScale = true);
+  void clearPointRadiusQuantity();
+
   // The points that make up this point cloud
   std::vector<glm::vec3> points;
   size_t nPoints() const { return points.size(); }
@@ -87,8 +106,6 @@ public:
 
   // Small utilities
   void deleteProgram();
-  void writePointsToFile(std::string filename = "");
-  void setPointCloudUniforms(render::ShaderProgram& p);
 
   // === Get/set visualization parameters
 
@@ -103,6 +120,11 @@ public:
   // Material
   PointCloud* setMaterial(std::string name);
   std::string getMaterial();
+
+  // Rendering helpers used by quantities
+  void setPointCloudUniforms(render::ShaderProgram& p);
+  std::vector<std::string> addStructureRules(std::vector<std::string> initRules);
+  void fillGeometryBuffers(render::ShaderProgram& p);
 
 private:
   // === Visualization parameters
@@ -124,9 +146,19 @@ private:
 
   // === Quantity adder implementations
   PointCloudScalarQuantity* addScalarQuantityImpl(std::string name, const std::vector<double>& data, DataType type);
+  PointCloudParameterizationQuantity*
+  addParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& param, ParamCoordsType type);
+  PointCloudParameterizationQuantity*
+  addLocalParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& param, ParamCoordsType type);
   PointCloudColorQuantity* addColorQuantityImpl(std::string name, const std::vector<glm::vec3>& colors);
   PointCloudVectorQuantity* addVectorQuantityImpl(std::string name, const std::vector<glm::vec3>& vectors,
                                                   VectorType vectorType);
+
+  // Manage varying point size
+  // which (scalar) quantity to set point size from
+  std::string pointRadiusQuantityName = ""; // empty string means none
+  bool pointRadiusQuantityAutoscale = true;
+  std::vector<double> resolvePointRadiusQuantity(); // helper
 };
 
 

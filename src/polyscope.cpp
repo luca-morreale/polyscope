@@ -20,47 +20,7 @@ using json = nlohmann::json;
 
 namespace polyscope {
 
-// === Declare storage global members
-
-namespace state {
-
-bool initialized = false;
-
-double lengthScale = 1.0;
-std::tuple<glm::vec3, glm::vec3> boundingBox;
-glm::vec3 center{0, 0, 0};
-
-std::map<std::string, std::map<std::string, Structure*>> structures;
-
-std::function<void()> userCallback;
-
-} // namespace state
-
-namespace options {
-
-std::string programName = "Polyscope";
-int verbosity = 1;
-std::string printPrefix = "[polyscope] ";
-bool errorsThrowExceptions = false;
-bool debugDrawPickBuffer = false;
-int maxFPS = 60;
-bool usePrefsFile = true;
-bool initializeWithDefaultStructures = true;
-bool alwaysRedraw = false;
-bool autocenterStructures = false;
-bool autoscaleStructures = false;
-bool openImGuiWindowForUserCallback = true;
-bool invokeUserCallbackForNestedShow = false;
-
-// enabled by default in debug mode
-#ifndef NDEBUG
-bool enableRenderErrorChecks = false;
-#else
-bool enableRenderErrorChecks = true;
-#endif
-
-} // namespace options
-
+// Note: Storage for global members lives in state.cpp and options.cpp
 
 // Helpers
 namespace {
@@ -82,7 +42,7 @@ bool redrawNextFrame = true;
 float imguiStackMargin = 10;
 float lastWindowHeightPolyscope = 200;
 float lastWindowHeightUser = 200;
-float leftWindowsWidth = 300;
+float leftWindowsWidth = 305;
 float rightWindowsWidth = 500;
 
 
@@ -145,8 +105,14 @@ void writePrefsFile() {
 
 void init(std::string backend) {
   if (state::initialized) {
-    throw std::logic_error(options::printPrefix + "Initialize called twice");
+    if(backend != state::backend) {
+      throw std::runtime_error("re-initializing with different backend is not supported");
+    }
+    // otherwise silently allow multiple-init
+    return;
   }
+  
+  state::backend = backend;
 
   if (options::usePrefsFile) {
     readPrefsFile();
@@ -186,6 +152,9 @@ void pushContext(std::function<void()> callbackFunction, bool drawDefaultUI) {
         "Uh oh, polyscope::show() was recusively MANY times (depth > 50), this is probably a bug. Perhaps "
         "you are accidentally calling show every time polyscope::userCallback executes?");
   };
+
+  // Make sure the window is visible
+  render::engine->showWindow();
 
   // Re-enter main loop until the context has been popped
   size_t currentContextStackSize = contextStack.size();
@@ -228,15 +197,11 @@ void drawStructures() {
 
   for (auto catMap : state::structures) {
     for (auto s : catMap.second) {
+      // make sure the right settings are active
+      // render::engine->setDepthMode();
+      // render::engine->applyTransparencySettings();
 
-      // Draw the pick buffer for debugging purposes
-      if (options::debugDrawPickBuffer) {
-        s.second->drawPick();
-      }
-      // The normal case
-      else {
-        s.second->draw();
-      }
+      s.second->draw();
     }
   }
 }
@@ -249,15 +214,21 @@ float dragDistSinceLastRelease = 0.0;
 void processInputEvents() {
   ImGuiIO& io = ImGui::GetIO();
 
-
   // If any mouse button is pressed, trigger a redraw
   if (ImGui::IsAnyMouseDown()) {
     requestRedraw();
   }
 
+  bool widgetCapturedMouse = false;
+  for (Widget* w : state::widgets) {
+    widgetCapturedMouse = w->interact();
+    if (widgetCapturedMouse) {
+      break;
+    }
+  }
 
   // Handle scroll events for 3D view
-  if (!io.WantCaptureMouse) {
+  if (!io.WantCaptureMouse && !widgetCapturedMouse) {
     double xoffset = io.MouseWheelH;
     double yoffset = io.MouseWheel;
 
@@ -285,7 +256,7 @@ void processInputEvents() {
   }
 
   // === Mouse inputs
-  if (!io.WantCaptureMouse) {
+  if (!io.WantCaptureMouse && !widgetCapturedMouse) {
 
     // Process drags
     bool dragLeft = ImGui::IsMouseDragging(0);
@@ -357,34 +328,91 @@ void processInputEvents() {
   }
 }
 
-void renderScene() {
+void renderSlicePlanes() {
+  for (SlicePlane* s : state::slicePlanes) {
+    s->draw();
+  }
+}
 
-  render::engine->setBackgroundColor({view::bgColor[0], view::bgColor[1], view::bgColor[2]});
-  render::engine->setBackgroundAlpha(view::bgColor[3]);
-  render::engine->clearSceneBuffer();
+void renderScene() {
+  processLazyProperties();
+
+  render::engine->applyTransparencySettings();
+
+  render::engine->sceneBuffer->clearColor = {0., 0., 0.};
+  render::engine->sceneBuffer->clearAlpha = 0.;
+  render::engine->sceneBuffer->clear();
 
   if (!render::engine->bindSceneBuffer()) return;
 
   // If a view has never been set, this will set it to the home view
   view::ensureViewValid();
 
-  render::engine->renderBackground();
-  render::engine->setDepthMode();
-  render::engine->setBlendMode();
+  if (render::engine->getTransparencyMode() == TransparencyMode::Pretty) {
+    // Special depth peeling case: multiple render passes
+    // We will perform several "peeled" rounds of rendering in to the usual scene buffer. After each, we will manually
+    // composite in to the final scene buffer.
 
-  // Draw the ground plane
-  if (options::groundPlaneEnabled) {
+
+    // Clear the final buffer explicitly since we will gradually composite in to it rather than just blitting directly
+    // as in normal rendering.
+    render::engine->sceneBufferFinal->clearColor = glm::vec3{0., 0., 0.};
+    render::engine->sceneBufferFinal->clearAlpha = 0;
+    render::engine->sceneBufferFinal->clear();
+
+    render::engine->setDepthMode(); // we need depth to be enabled for the clear below to do anything
+    render::engine->sceneDepthMinFrame->clear();
+
+
+    for (int iPass = 0; iPass < options::transparencyRenderPasses; iPass++) {
+
+      render::engine->bindSceneBuffer();
+      render::engine->clearSceneBuffer();
+
+      render::engine->applyTransparencySettings();
+      drawStructures();
+
+      // Draw ground plane, slicers, etc
+      bool isRedraw = iPass > 0;
+      render::engine->groundPlane.draw(isRedraw);
+      if (!isRedraw) {
+        // Only on first pass (kinda weird, but works out, and doesn't really matter)
+        renderSlicePlanes();
+      }
+
+      // Composite the result of this pass in to the result buffer
+      render::engine->sceneBufferFinal->bind();
+      render::engine->setDepthMode(DepthMode::Disable);
+      render::engine->setBlendMode(BlendMode::Under);
+      render::engine->compositePeel->draw();
+
+      // Update the minimum depth texture
+      render::engine->updateMinDepthTexture();
+    }
+
+
+  } else {
+    // Normal case: single render pass
+    render::engine->applyTransparencySettings();
+
+    drawStructures();
+
     render::engine->groundPlane.draw();
+    renderSlicePlanes();
+
+    render::engine->sceneBuffer->blitTo(render::engine->sceneBufferFinal.get());
   }
-
-  drawStructures();
-
-  render::engine->sceneBuffer->blitTo(render::engine->sceneBufferFinal.get());
-}
+} // namespace
 
 void renderSceneToScreen() {
   render::engine->bindDisplay();
-  render::engine->applyLightingTransform(render::engine->sceneColorFinal);
+  if (options::debugDrawPickBuffer) {
+    // special debug draw
+    pick::evaluatePickQuery(-1, -1); // populate the buffer
+    render::engine->pickFramebuffer->blitTo(render::engine->displayBuffer.get());
+  } else {
+    render::engine->applyLightingTransform(render::engine->sceneColorFinal);
+  }
 }
 
 void buildPolyscopeGui() {
@@ -400,9 +428,29 @@ void buildPolyscopeGui() {
     view::flyToHomeView();
   }
   ImGui::SameLine();
+  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(1.0f, 0.0f));
   if (ImGui::Button("Screenshot")) {
-    screenshot(true);
+    screenshot(options::screenshotTransparency);
   }
+  ImGui::SameLine();
+  if (ImGui::ArrowButton("##Option", ImGuiDir_Down)) {
+    ImGui::OpenPopup("ScreenshotOptionsPopup");
+  }
+  ImGui::PopStyleVar();
+  if (ImGui::BeginPopup("ScreenshotOptionsPopup")) {
+
+    ImGui::Checkbox("with transparency", &options::screenshotTransparency);
+
+    if (ImGui::BeginMenu("file format")) {
+      if (ImGui::MenuItem(".png", NULL, options::screenshotExtension == ".png")) options::screenshotExtension = ".png";
+      if (ImGui::MenuItem(".jpg", NULL, options::screenshotExtension == ".jpg")) options::screenshotExtension = ".jpg";
+      ImGui::EndMenu();
+    }
+
+    ImGui::EndPopup();
+  }
+
+
   ImGui::SameLine();
   if (ImGui::Button("Controls")) {
     // do nothing, just want hover state
@@ -442,15 +490,18 @@ void buildPolyscopeGui() {
   // Debug options tree
   ImGui::SetNextTreeNodeOpen(false, ImGuiCond_FirstUseEver);
   if (ImGui::TreeNode("Debug")) {
+    if (ImGui::Button("Force refresh")) {
+      refresh();
+    }
     ImGui::Checkbox("Show pick buffer", &options::debugDrawPickBuffer);
     ImGui::Checkbox("Always redraw", &options::alwaysRedraw);
 
     static bool showDebugTextures = false;
     ImGui::Checkbox("Show debug textures", &showDebugTextures);
     if (showDebugTextures) {
+      render::engine->showTextureInImGuiWindow("Scene", render::engine->sceneColor.get());
       render::engine->showTextureInImGuiWindow("Scene Final", render::engine->sceneColorFinal.get());
     }
-
     ImGui::TreePop();
   }
 
@@ -558,10 +609,13 @@ auto lastMainLoopIterTime = std::chrono::steady_clock::now();
 } // namespace
 
 void draw(bool withUI) {
+  processLazyProperties();
 
   // Update buffer and context
   render::engine->makeContextCurrent();
   render::engine->bindDisplay();
+  render::engine->setBackgroundColor({view::bgColor[0], view::bgColor[1], view::bgColor[2]});
+  render::engine->setBackgroundAlpha(view::bgColor[3]);
   render::engine->clearDisplay();
 
   if (withUI) {
@@ -580,6 +634,10 @@ void draw(bool withUI) {
       buildPolyscopeGui();
       buildStructureGui();
       buildPickGui();
+
+      for (Widget* w : state::widgets) {
+        w->buildGUI();
+      }
     }
   }
 
@@ -588,6 +646,8 @@ void draw(bool withUI) {
   if (contextStack.back().callback) {
     (contextStack.back().callback)();
   }
+
+  processLazyProperties();
 
   // Draw structures in the scene
   if (redrawNextFrame || options::alwaysRedraw) {
@@ -598,14 +658,21 @@ void draw(bool withUI) {
 
   // Draw the GUI
   if (withUI) {
+    // render widgets
+    render::engine->bindDisplay();
+    for (Widget* w : state::widgets) {
+      w->draw();
+    }
+
     render::engine->bindDisplay();
     render::engine->ImGuiRender();
   }
-} // namespace polyscope
+}
 
 
 void mainLoopIteration() {
 
+  processLazyProperties();
 
   // The windowing system will let this busy-loop in some situations, unfortunately. Make sure that doesn't happen.
   if (options::maxFPS != -1) {
@@ -641,8 +708,6 @@ void show(size_t forFrames) {
                            "must initialize Polyscope with polyscope::init() before calling polyscope::show().");
   }
 
-  render::engine->showWindow();
-
   auto checkFrames = [&]() {
     if (forFrames == 0) {
       popContext();
@@ -654,6 +719,11 @@ void show(size_t forFrames) {
 
   if (options::usePrefsFile) {
     writePrefsFile();
+  }
+
+  // if this was the outermost show(), hide the window afterward
+  if (contextStack.size() == 1) {
+    render::engine->hideWindow();
   }
 }
 
@@ -836,6 +906,89 @@ void removeAllStructures() {
   requestRedraw();
   pick::resetSelection();
 }
+
+void refresh() {
+
+  // reset the ground plane
+  render::engine->groundPlane.prepare();
+
+  // reset all of the structures
+  for (auto cat : state::structures) {
+    for (auto x : cat.second) {
+      x.second->refresh();
+    }
+  }
+
+  requestRedraw();
+}
+
+// Cached versions of lazy properties used for updates
+namespace lazy {
+TransparencyMode transparencyMode = TransparencyMode::None;
+int transparencyRenderPasses = 8;
+int ssaaFactor = 1;
+bool groundPlaneEnabled = true;
+GroundPlaneMode groundPlaneMode = GroundPlaneMode::TileReflection;
+ScaledValue<float> groundPlaneHeightFactor = 0;
+int shadowBlurIters = 2;
+float shadowDarkness = .4;
+} // namespace lazy
+
+void processLazyProperties() {
+
+  // Note: This function essentially represents lazy software design, and it's an ugly and error-prone part of the
+  // system. The reason for it that some settings require action on a change (e..g re-drawing the scene), but we want to
+  // allow variable-set syntax like `polyscope::setting = newVal;` rather than getters and setters like
+  // `polyscope::setSetting(newVal);`. It might have been better to simple set options with setter from the start, but
+  // that ship has sailed.
+  //
+  // This function is a workaround which polls for changes to options settings, and performs any necessary additional
+  // work.
+
+
+  // transparency mode
+  if (lazy::transparencyMode != options::transparencyMode) {
+    lazy::transparencyMode = options::transparencyMode;
+    render::engine->setTransparencyMode(options::transparencyMode);
+  }
+
+  // transparency render passes
+  if (lazy::transparencyRenderPasses != options::transparencyRenderPasses) {
+    lazy::transparencyRenderPasses = options::transparencyRenderPasses;
+    requestRedraw();
+  }
+
+  // ssaa
+  if (lazy::ssaaFactor != options::ssaaFactor) {
+    lazy::ssaaFactor = options::ssaaFactor;
+    render::engine->setSSAAFactor(options::ssaaFactor);
+  }
+
+  // ground plane
+  if (lazy::groundPlaneEnabled != options::groundPlaneEnabled || lazy::groundPlaneMode != options::groundPlaneMode) {
+    lazy::groundPlaneEnabled = options::groundPlaneEnabled;
+    if (!options::groundPlaneEnabled) {
+      // if the (depecated) groundPlaneEnabled = false, set mode to None, so we only have one variable to check
+      options::groundPlaneMode = GroundPlaneMode::None;
+    }
+    lazy::groundPlaneMode = options::groundPlaneMode;
+    render::engine->groundPlane.prepare();
+    requestRedraw();
+  }
+  if (lazy::groundPlaneHeightFactor.asAbsolute() != options::groundPlaneHeightFactor.asAbsolute() ||
+      lazy::groundPlaneHeightFactor.isRelative() != options::groundPlaneHeightFactor.isRelative()) {
+    lazy::groundPlaneHeightFactor = options::groundPlaneHeightFactor;
+    requestRedraw();
+  }
+  if (lazy::shadowBlurIters != options::shadowBlurIters) {
+    lazy::shadowBlurIters = options::shadowBlurIters;
+    requestRedraw();
+  }
+  if (lazy::shadowDarkness != options::shadowDarkness) {
+    lazy::shadowDarkness = options::shadowDarkness;
+    requestRedraw();
+  }
+};
 
 void updateStructureExtents() {
   // Compute length scale and bbox as the max of all structures

@@ -19,8 +19,6 @@
 #define GLM_ENABLE_EXPERIMENTAL
 #include "glm/gtx/string_cast.hpp"
 
-#include "stb_image.h"
-
 
 using std::cerr;
 using std::cout;
@@ -249,6 +247,7 @@ polyscope::warning("Some problems come in groups", "detail = " + std::to_string(
 
     // At vertices
     std::vector<glm::vec2> vertexIntrinsicVec(nVertices, glm::vec3{0., 0., 0.});
+    psMesh->generateDefaultVertexTangentSpaces();
     psMesh->ensureHaveVertexTangentSpaces();
     for (size_t iV = 0; iV < nVertices; iV++) {
       glm::vec3 pos = psMesh->vertices[iV];
@@ -264,6 +263,7 @@ polyscope::warning("Some problems come in groups", "detail = " + std::to_string(
 
     // At faces
     std::vector<glm::vec2> faceIntrinsicVec(nFaces, glm::vec3{0., 0., 0.});
+    psMesh->generateDefaultFaceTangentSpaces();
     psMesh->ensureHaveFaceTangentSpaces();
     for (size_t iF = 0; iF < nFaces; iF++) {
 

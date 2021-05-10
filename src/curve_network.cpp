@@ -4,7 +4,6 @@
 #include "polyscope/pick.h"
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
-#include "polyscope/render/shaders.h"
 
 #include "imgui.h"
 
@@ -91,7 +90,7 @@ void CurveNetwork::draw() {
 
     // Draw the actual curve network
     edgeProgram->draw();
-		nodeProgram->draw();
+    nodeProgram->draw();
   }
 
   // Draw the quantities
@@ -122,26 +121,15 @@ void CurveNetwork::drawPick() {
 }
 
 void CurveNetwork::prepare() {
-
-  // TODO figure out billboarded cylinders to fix visual artifacs
-  // This might be a starting point:
-  // https://www.inf.tu-dresden.de/content/institutes/smt/cg/results/minorthesis/pbrausewetter/files/Beleg.pdf
-
   if (dominantQuantity != nullptr) {
     return;
   }
 
-
-  // It not quantity is coloring the network, draw with a default color
-  nodeProgram = render::engine->generateShaderProgram(
-      {render::SPHERE_VERT_SHADER, render::SPHERE_BILLBOARD_GEOM_SHADER, render::SPHERE_BILLBOARD_FRAG_SHADER},
-      DrawMode::Points);
+  // It no quantity is coloring the network, draw with a default color
+  nodeProgram = render::engine->requestShader("RAYCAST_SPHERE", {"SHADE_BASECOLOR"});
   render::engine->setMaterial(*nodeProgram, getMaterial());
 
-
-  edgeProgram = render::engine->generateShaderProgram(
-      {render::PASSTHRU_CYLINDER_VERT_SHADER, render::CYLINDER_GEOM_SHADER, render::CYLINDER_FRAG_SHADER},
-      DrawMode::Points);
+  edgeProgram = render::engine->requestShader("RAYCAST_CYLINDER", {"SHADE_BASECOLOR"});
   render::engine->setMaterial(*edgeProgram, getMaterial());
 
   // Fill out the geometry data for the programs
@@ -161,10 +149,8 @@ void CurveNetwork::preparePick() {
   size_t pickStart = pick::requestPickBufferRange(this, totalPickElements);
 
   { // Set up node picking program
-    nodePickProgram = render::engine->generateShaderProgram({render::SPHERE_COLOR_VERT_SHADER,
-                                                             render::SPHERE_COLOR_BILLBOARD_GEOM_SHADER,
-                                                             render::SPHERE_COLOR_PLAIN_BILLBOARD_FRAG_SHADER},
-                                                            DrawMode::Points);
+    nodePickProgram = render::engine->requestShader("RAYCAST_SPHERE", {"SPHERE_PROPAGATE_COLOR"},
+                                                    render::ShaderReplacementDefaults::Pick);
 
     // Fill color buffer with packed point indices
     std::vector<glm::vec3> pickColors;
@@ -182,9 +168,8 @@ void CurveNetwork::preparePick() {
   }
 
   { // Set up edge picking program
-    edgePickProgram = render::engine->generateShaderProgram(
-        {render::CYLINDER_PICK_VERT_SHADER, render::CYLINDER_PICK_GEOM_SHADER, render::CYLINDER_PICK_FRAG_SHADER},
-        DrawMode::Points);
+    edgePickProgram = render::engine->requestShader("RAYCAST_CYLINDER", {"CYLINDER_PROPAGATE_PICK"},
+                                                    render::ShaderReplacementDefaults::Pick);
 
     // Fill color buffer with packed node/edge indices
     std::vector<glm::vec3> edgePickTail(nEdges());
@@ -232,17 +217,17 @@ void CurveNetwork::fillEdgeGeometryBuffers(render::ShaderProgram& program) {
   program.setAttribute("a_position_tip", posTip);
 }
 
-void CurveNetwork::geometryChanged() {
+void CurveNetwork::refresh() {
   nodeProgram.reset();
   edgeProgram.reset();
   nodePickProgram.reset();
   edgePickProgram.reset();
-
-  for (auto& q : quantities) {
-    q.second->geometryChanged();
-  }
-
   requestRedraw();
+  QuantityStructure<CurveNetwork>::refresh(); // call base class version, which refreshes quantities
+}
+
+void CurveNetwork::geometryChanged() {
+  refresh();
 }
 
 void CurveNetwork::buildPickUI(size_t localPickID) {
@@ -330,7 +315,7 @@ double CurveNetwork::lengthScale() {
 
   double lengthScale = 0.0;
   for (glm::vec3& rawP : nodes) {
-    glm::vec3 p = glm::vec3(objectTransform * glm::vec4(rawP, 1.0));
+    glm::vec3 p = glm::vec3(objectTransform.get() * glm::vec4(rawP, 1.0));
     lengthScale = std::max(lengthScale, (double)glm::length2(p - center));
   }
 
@@ -343,7 +328,7 @@ std::tuple<glm::vec3, glm::vec3> CurveNetwork::boundingBox() {
   glm::vec3 max = -glm::vec3{1, 1, 1} * std::numeric_limits<float>::infinity();
 
   for (glm::vec3& rawP : nodes) {
-    glm::vec3 p = glm::vec3(objectTransform * glm::vec4(rawP, 1.0));
+    glm::vec3 p = glm::vec3(objectTransform.get() * glm::vec4(rawP, 1.0));
     min = componentwiseMin(min, p);
     max = componentwiseMax(max, p);
   }

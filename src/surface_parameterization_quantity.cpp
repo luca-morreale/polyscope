@@ -4,6 +4,7 @@
 #include "polyscope/file_helpers.h"
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
+
 #include "polyscope/render/shaders.h"
 #include "polyscope/render/material_defs.h"
 
@@ -26,7 +27,7 @@ SurfaceParameterizationQuantity::SurfaceParameterizationQuantity(std::string nam
       checkColor2(uniquePrefix() + "#checkColor2", glm::vec3(.976, .856, .885)),
       gridLineColor(uniquePrefix() + "#gridLineColor", render::RGB_WHITE),
       gridBackgroundColor(uniquePrefix() + "#gridBackgroundColor", render::RGB_PINK),
-      cMap(uniquePrefix() + "#cMap", "phase")
+      altDarkness(uniquePrefix() + "#altDarkness", 0.5), cMap(uniquePrefix() + "#cMap", "phase")
 
 {}
 
@@ -40,6 +41,7 @@ void SurfaceParameterizationQuantity::draw() {
   // Set uniforms
   parent.setTransformUniforms(*program);
   setProgramUniforms(*program);
+  parent.setStructureUniforms(*program);
 
   program->draw();
 }
@@ -49,21 +51,30 @@ void SurfaceParameterizationQuantity::createProgram() {
 
   switch (getStyle()) {
   case ParamVizStyle::CHECKER:
-    program = render::engine->generateShaderProgram(
-        {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_CHECKER_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    // program = render::engine->generateShaderProgram(
+    //{render::PARAM_SURFACE_VERT_SHADER, render::PARAM_CHECKER_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    program = render::engine->requestShader(
+        "MESH", parent.addStructureRules({"MESH_PROPAGATE_VALUE2", "SHADE_CHECKER_VALUE2"}));
     break;
   case ParamVizStyle::GRID:
-    program = render::engine->generateShaderProgram(
-        {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_GRID_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    // program = render::engine->generateShaderProgram(
+    //{render::PARAM_SURFACE_VERT_SHADER, render::PARAM_GRID_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    program =
+        render::engine->requestShader("MESH", parent.addStructureRules({"MESH_PROPAGATE_VALUE2", "SHADE_GRID_VALUE2"}));
     break;
   case ParamVizStyle::LOCAL_CHECK:
-    program = render::engine->generateShaderProgram(
-        {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_LOCAL_CHECKER_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    // program = render::engine->generateShaderProgram(
+    //{render::PARAM_SURFACE_VERT_SHADER, render::PARAM_LOCAL_CHECKER_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    program = render::engine->requestShader(
+        "MESH", parent.addStructureRules({"MESH_PROPAGATE_VALUE2", "SHADE_COLORMAP_ANGULAR2", "CHECKER_VALUE2COLOR"}));
     program->setTextureFromColormap("t_colormap", cMap.get());
     break;
   case ParamVizStyle::LOCAL_RAD:
-    program = render::engine->generateShaderProgram(
-        {render::PARAM_SURFACE_VERT_SHADER, render::PARAM_LOCAL_RAD_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    // program = render::engine->generateShaderProgram(
+    //{render::PARAM_SURFACE_VERT_SHADER, render::PARAM_LOCAL_RAD_SURFACE_FRAG_SHADER}, DrawMode::Triangles);
+    program = render::engine->requestShader(
+        "MESH", parent.addStructureRules({"MESH_PROPAGATE_VALUE2", "SHADE_COLORMAP_ANGULAR2", "SHADEVALUE_MAG_VALUE2",
+                                          "ISOLINE_STRIPE_VALUECOLOR"}));
     program->setTextureFromColormap("t_colormap", cMap.get());
     break;
   case ParamVizStyle::COLOR_CHECKER:
@@ -117,6 +128,7 @@ void SurfaceParameterizationQuantity::setProgramUniforms(render::ShaderProgram& 
   case ParamVizStyle::LOCAL_CHECK:
   case ParamVizStyle::LOCAL_RAD:
     program.setUniform("u_angle", localRot);
+    program.setUniform("u_modDarkness", getAltDarkness());
     break;
   case ParamVizStyle::COLOR_CHECKER:
     program.setUniform("u_color1", getCheckerColors().first);
@@ -194,7 +206,11 @@ void SurfaceParameterizationQuantity::buildCustomUI() {
   case ParamVizStyle::LOCAL_RAD: {
     // Angle slider
     ImGui::PushItemWidth(100);
-    ImGui::SliderAngle("angle shift", &localRot, -180, 180); // displays in degrees, works in radians
+    ImGui::SliderAngle("angle shift", &localRot, -180, 180); // displays in degrees, works in radians TODO refresh/update/persist
+    if (ImGui::DragFloat("alt darkness", &altDarkness.get(), 0.01, 0., 1.)) {
+      altDarkness.manuallyChanged();
+      requestRedraw();
+    }
     ImGui::PopItemWidth();
 
     // Set colormap
@@ -264,7 +280,18 @@ SurfaceParameterizationQuantity* SurfaceParameterizationQuantity::setColorMap(st
 }
 std::string SurfaceParameterizationQuantity::getColorMap() { return cMap.get(); }
 
-void SurfaceParameterizationQuantity::geometryChanged() { program.reset(); }
+SurfaceParameterizationQuantity* SurfaceParameterizationQuantity::setAltDarkness(double newVal) {
+  altDarkness = newVal;
+  requestRedraw();
+  return this;
+}
+
+double SurfaceParameterizationQuantity::getAltDarkness() { return altDarkness.get(); }
+
+void SurfaceParameterizationQuantity::refresh() {
+  program.reset();
+  Quantity::refresh();
+}
 
 // ==============================================================
 // ===============  Corner Parameterization  ====================
@@ -304,7 +331,7 @@ void SurfaceCornerParameterizationQuantity::fillColorBuffers(render::ShaderProgr
   }
 
   // Store data in buffers
-  p.setAttribute("a_coord", coordVal);
+  p.setAttribute("a_value2", coordVal);
 }
 
 void SurfaceCornerParameterizationQuantity::buildHalfedgeInfoGUI(size_t heInd) {
@@ -349,7 +376,7 @@ void SurfaceVertexParameterizationQuantity::fillColorBuffers(render::ShaderProgr
   }
 
   // Store data in buffers
-  p.setAttribute("a_coord", coordVal);
+  p.setAttribute("a_value2", coordVal);
 }
 
 void SurfaceVertexParameterizationQuantity::buildVertexInfoGUI(size_t vInd) {

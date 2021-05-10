@@ -5,7 +5,6 @@
 #include "polyscope/pick.h"
 #include "polyscope/polyscope.h"
 #include "polyscope/render/engine.h"
-#include "polyscope/render/shaders.h"
 
 #include "polyscope/point_cloud_color_quantity.h"
 #include "polyscope/point_cloud_scalar_quantity.h"
@@ -36,9 +35,16 @@ PointCloud::PointCloud(std::string name, std::vector<glm::vec3> points_)
 void PointCloud::setPointCloudUniforms(render::ShaderProgram& p) {
   glm::mat4 P = view::getCameraPerspectiveMatrix();
   glm::mat4 Pinv = glm::inverse(P);
-  p.setUniform("u_pointRadius", pointRadius.get().asAbsolute());
   p.setUniform("u_invProjMatrix", glm::value_ptr(Pinv));
   p.setUniform("u_viewport", render::engine->getCurrentViewport());
+
+  if (pointRadiusQuantityName != "" && !pointRadiusQuantityAutoscale) {
+    // special case: ignore radius uniform
+    p.setUniform("u_pointRadius", 1.);
+  } else {
+    // common case
+    p.setUniform("u_pointRadius", pointRadius.get().asAbsolute());
+  }
 }
 
 void PointCloud::draw() {
@@ -92,14 +98,11 @@ void PointCloud::prepare() {
     return;
   }
 
-  program = render::engine->generateShaderProgram(
-      {render::SPHERE_VERT_SHADER, render::SPHERE_BILLBOARD_GEOM_SHADER, render::SPHERE_BILLBOARD_FRAG_SHADER},
-      DrawMode::Points);
-
+  program = render::engine->requestShader("RAYCAST_SPHERE", addStructureRules({"SHADE_BASECOLOR"}));
   render::engine->setMaterial(*program, material.get());
 
   // Fill out the geometry data for the program
-  program->setAttribute("a_position", points);
+  fillGeometryBuffers(*program);
 }
 
 void PointCloud::preparePick() {
@@ -109,10 +112,8 @@ void PointCloud::preparePick() {
   size_t pickStart = pick::requestPickBufferRange(this, pickCount);
 
   // Create a new pick program
-  pickProgram = render::engine->generateShaderProgram({render::SPHERE_COLOR_VERT_SHADER,
-                                                       render::SPHERE_COLOR_BILLBOARD_GEOM_SHADER,
-                                                       render::SPHERE_COLOR_PLAIN_BILLBOARD_FRAG_SHADER},
-                                                      DrawMode::Points);
+  pickProgram = render::engine->requestShader("RAYCAST_SPHERE", addStructureRules({"SPHERE_PROPAGATE_COLOR"}),
+                                              render::ShaderReplacementDefaults::Pick);
 
   // Fill color buffer with packed point indices
   std::vector<glm::vec3> pickColors;
@@ -121,22 +122,68 @@ void PointCloud::preparePick() {
     pickColors.push_back(pick::indToVec(i));
   }
 
-
   // Store data in buffers
-  pickProgram->setAttribute("a_position", points);
+  fillGeometryBuffers(*pickProgram);
   pickProgram->setAttribute("a_color", pickColors);
 }
 
-void PointCloud::geometryChanged() {
-  program.reset();
-  pickProgram.reset();
 
-  for (auto& q : quantities) {
-    q.second->geometryChanged();
+std::vector<std::string> PointCloud::addStructureRules(std::vector<std::string> initRules) {
+  if (pointRadiusQuantityName != "") {
+    initRules.push_back("SPHERE_VARIABLE_SIZE");
+  }
+  return initRules;
+}
+
+// helper
+std::vector<double> PointCloud::resolvePointRadiusQuantity() {
+  PointCloudScalarQuantity* sizeScalarQ = nullptr;
+  PointCloudQuantity* sizeQ = getQuantity(pointRadiusQuantityName);
+  if (sizeQ != nullptr) {
+    sizeScalarQ = dynamic_cast<PointCloudScalarQuantity*>(sizeQ);
+    if (sizeScalarQ == nullptr) {
+      polyscope::error("Cannot populate point size from quantity [" + name + "], it is not a scalar quantity");
+    }
+  } else {
+    polyscope::error("Cannot populate point size from quantity [" + name + "], it does not exist");
   }
 
-  requestRedraw();
+  std::vector<double> sizes;
+  if (sizeScalarQ == nullptr) {
+    // we failed to resolve above; populate with dummy data so we can continue processing
+    std::vector<double> ones(nPoints(), 1.);
+    sizes = ones;
+  } else {
+    sizes = sizeScalarQ->values;
+  }
+
+  // clamp to nonnegative and autoscale (if requested)
+  double max = 0;
+  for (double& x : sizes) {
+    if (!(x > 0)) x = 0; // ensure all nonnegative
+    max = std::fmax(max, x);
+  }
+  if (max == 0) max = 1e-6;
+  if (pointRadiusQuantityAutoscale) {
+    for (double& x : sizes) {
+      x /= max;
+    }
+  }
+
+  return sizes;
 }
+
+void PointCloud::fillGeometryBuffers(render::ShaderProgram& p) {
+  p.setAttribute("a_position", points);
+
+  if (pointRadiusQuantityName != "") {
+    // Resolve the quantity
+    std::vector<double> pointRadiusQuantityVals = resolvePointRadiusQuantity();
+    p.setAttribute("a_pointRadius", pointRadiusQuantityVals);
+  }
+}
+
+void PointCloud::geometryChanged() { refresh(); }
 
 void PointCloud::buildPickUI(size_t localPickID) {
 
@@ -165,7 +212,7 @@ void PointCloud::buildCustomUI() {
     setPointColor(getPointColor());
   }
   ImGui::SameLine();
-  ImGui::PushItemWidth(100);
+  ImGui::PushItemWidth(70);
   if (ImGui::SliderFloat("Radius", pointRadius.get().getValuePtr(), 0.0, .1, "%.5f", 3.)) {
     pointRadius.manuallyChanged();
     requestRedraw();
@@ -174,7 +221,23 @@ void PointCloud::buildCustomUI() {
 }
 
 void PointCloud::buildCustomOptionsUI() {
-  if (ImGui::MenuItem("Write points to file")) writePointsToFile();
+
+  if (ImGui::BeginMenu("Variable Radius")) {
+
+    if (ImGui::MenuItem("none", nullptr, pointRadiusQuantityName == "")) clearPointRadiusQuantity();
+    ImGui::Separator();
+
+    for (auto& q : quantities) {
+      PointCloudScalarQuantity* scalarQ = dynamic_cast<PointCloudScalarQuantity*>(q.second.get());
+      if (scalarQ != nullptr) {
+        if (ImGui::MenuItem(scalarQ->name.c_str(), nullptr, pointRadiusQuantityName == scalarQ->name))
+          setPointRadiusQuantity(scalarQ);
+      }
+    }
+
+    ImGui::EndMenu();
+  }
+
   if (render::buildMaterialOptionsGui(material.get())) {
     material.manuallyChanged();
     setMaterial(material.get()); // trigger the other updates that happen on set()
@@ -190,7 +253,7 @@ double PointCloud::lengthScale() {
 
   double lengthScale = 0.0;
   for (glm::vec3& rawP : points) {
-    glm::vec3 p = glm::vec3(objectTransform * glm::vec4(rawP, 1.0));
+    glm::vec3 p = glm::vec3(objectTransform.get() * glm::vec4(rawP, 1.0));
     lengthScale = std::max(lengthScale, (double)glm::length2(p - center));
   }
 
@@ -203,7 +266,7 @@ std::tuple<glm::vec3, glm::vec3> PointCloud::boundingBox() {
   glm::vec3 max = -glm::vec3{1, 1, 1} * std::numeric_limits<float>::infinity();
 
   for (glm::vec3& rawP : points) {
-    glm::vec3 p = glm::vec3(objectTransform * glm::vec4(rawP, 1.0));
+    glm::vec3 p = glm::vec3(objectTransform.get() * glm::vec4(rawP, 1.0));
     min = componentwiseMin(min, p);
     max = componentwiseMax(max, p);
   }
@@ -214,34 +277,39 @@ std::tuple<glm::vec3, glm::vec3> PointCloud::boundingBox() {
 
 std::string PointCloud::typeName() { return structureTypeName; }
 
+
+void PointCloud::refresh() {
+  program.reset();
+  pickProgram.reset();
+  QuantityStructure<PointCloud>::refresh(); // call base class version, which refreshes quantities
+}
+
+
+// === Set point size from a scalar quantity
+void PointCloud::setPointRadiusQuantity(PointCloudScalarQuantity* quantity, bool autoScale) {
+  setPointRadiusQuantity(quantity->name, autoScale);
+}
+
+void PointCloud::setPointRadiusQuantity(std::string name, bool autoScale) {
+  pointRadiusQuantityName = name;
+  pointRadiusQuantityAutoscale = autoScale;
+
+  resolvePointRadiusQuantity(); // do it once, just so we fail fast if it doesn't exist
+
+  refresh(); // TODO this is a bit overkill
+}
+
+void PointCloud::clearPointRadiusQuantity() {
+  pointRadiusQuantityName = "";
+  refresh();
+}
+
 // === Quantities
 
 // Quantity default methods
 PointCloudQuantity::PointCloudQuantity(std::string name_, PointCloud& pointCloud_, bool dominates_)
     : Quantity<PointCloud>(name_, pointCloud_, dominates_) {}
 
-
-void PointCloud::writePointsToFile(std::string filename) {
-
-  if (filename == "") {
-    filename = promptForFilename();
-    if (filename == "") {
-      return;
-    }
-  }
-
-  cout << "Writing point cloud " << name << " to file " << filename << endl;
-
-  std::ofstream outFile(filename);
-  outFile << "#Polyscope point cloud " << name << endl;
-  outFile << "#displayradius " << (pointRadius.get().asAbsolute()) << endl;
-
-  for (size_t i = 0; i < points.size(); i++) {
-    outFile << points[i] << endl;
-  }
-
-  outFile.close();
-}
 
 void PointCloudQuantity::buildInfoGUI(size_t pointInd) {}
 
@@ -257,6 +325,18 @@ PointCloudColorQuantity* PointCloud::addColorQuantityImpl(std::string name, cons
 PointCloudScalarQuantity* PointCloud::addScalarQuantityImpl(std::string name, const std::vector<double>& data,
                                                             DataType type) {
   PointCloudScalarQuantity* q = new PointCloudScalarQuantity(name, data, *this, type);
+  addQuantity(q);
+  return q;
+}
+
+PointCloudParameterizationQuantity* PointCloud::addParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& param, ParamCoordsType type) {
+  PointCloudParameterizationQuantity* q = new PointCloudParameterizationQuantity(name, param, type, ParamVizStyle::CHECKER, *this);
+  addQuantity(q);
+  return q;
+}
+
+PointCloudParameterizationQuantity* PointCloud::addLocalParameterizationQuantityImpl(std::string name, const std::vector<glm::vec2>& param, ParamCoordsType type) {
+  PointCloudParameterizationQuantity* q = new PointCloudParameterizationQuantity(name, param, type, ParamVizStyle::LOCAL_CHECK, *this);
   addQuantity(q);
   return q;
 }
