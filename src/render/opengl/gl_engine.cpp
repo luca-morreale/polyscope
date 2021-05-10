@@ -70,7 +70,7 @@ inline GLenum formatF(const TextureFormat& x) {
     case TextureFormat::RGB8:       return GL_RGB;
     case TextureFormat::RGBA8:      return GL_RGBA;
     case TextureFormat::RG16F:      return GL_RG;
-    case TextureFormat::RGB16F:     return GL_RGB; 
+    case TextureFormat::RGB16F:     return GL_RGB;
     case TextureFormat::RGBA16F:    return GL_RGBA;
     case TextureFormat::R32F:       return GL_RED;
     case TextureFormat::R16F:       return GL_RED;
@@ -112,7 +112,7 @@ inline GLenum native(const ShaderStageType& x) {
 inline GLenum native(const RenderBufferType& x) {
   switch (x) {
     case RenderBufferType::ColorAlpha:      return GL_RGBA;
-    case RenderBufferType::Color:           return GL_RGB; 
+    case RenderBufferType::Color:           return GL_RGB;
     case RenderBufferType::Depth:           return GL_DEPTH_COMPONENT;
     case RenderBufferType::Float4:          return GL_RGBA32F;
   }
@@ -2066,12 +2066,12 @@ void GLEngine::populateDefaultShadersAndRules() {
   registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_2", DOWNSAMPLE_RESOLVE_2});
   registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_3", DOWNSAMPLE_RESOLVE_3});
   registeredShaderRules.insert({"DOWNSAMPLE_RESOLVE_4", DOWNSAMPLE_RESOLVE_4});
-  
+
   registeredShaderRules.insert({"TRANSPARENCY_STRUCTURE", TRANSPARENCY_STRUCTURE});
   registeredShaderRules.insert({"TRANSPARENCY_RESOLVE_SIMPLE", TRANSPARENCY_RESOLVE_SIMPLE});
   registeredShaderRules.insert({"TRANSPARENCY_PEEL_STRUCTURE", TRANSPARENCY_PEEL_STRUCTURE});
   registeredShaderRules.insert({"TRANSPARENCY_PEEL_GROUND", TRANSPARENCY_PEEL_GROUND});
-  
+
   registeredShaderRules.insert({"GENERATE_WORLD_POS", GENERATE_WORLD_POS});
   registeredShaderRules.insert({"CULL_POS_FROM_WORLD", CULL_POS_FROM_WORLD});
   registeredShaderRules.insert({"CULL_POS_FROM_ATTR", CULL_POS_FROM_ATTR});
@@ -2115,6 +2115,8 @@ void GLEngine::populateDefaultShadersAndRules() {
   registeredShaderRules.insert({"CYLINDER_PROPAGATE_COLOR", CYLINDER_PROPAGATE_COLOR});
   registeredShaderRules.insert({"CYLINDER_PROPAGATE_BLEND_COLOR", CYLINDER_PROPAGATE_BLEND_COLOR});
   registeredShaderRules.insert({"CYLINDER_PROPAGATE_PICK", CYLINDER_PROPAGATE_PICK});
+
+  registeredShaderRules.insert({"PARAM_TEXT2COLOR", PARAM_TEXT2COLOR});
 
   // clang-format on
 };
