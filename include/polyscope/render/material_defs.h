@@ -37,6 +37,7 @@ extern const std::array<unsigned char, 29444> bindata_normal;
 
 extern const std::array<unsigned char, 50022> bindata_concrete;
 
+extern const std::array<unsigned char, 463848> bindata_colorchecker;
 
 } // namespace render
 } // namespace polyscope

@@ -12,25 +12,25 @@ SET(INCLUDE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../include/polyscope/")
 # Add the main _engine file no matter what. All of the interesting parts are ifdef'd out, and this
 # allows us to resolve stubs.
 list (APPEND BACKEND_SRCS
-		render/opengl/gl_engine.cpp  
-		render/mock_opengl/mock_gl_engine.cpp  
+		render/opengl/gl_engine.cpp
+		render/mock_opengl/mock_gl_engine.cpp
 )
 
 # Configure the render backend
 if("${POLYSCOPE_BACKEND_OPENGL3_GLFW}")
   message("Polyscope backend openGL3_glfw enabled")
-	
+
   list (APPEND BACKEND_SRCS
-		render/opengl/gl_engine.cpp  
-		render/opengl/shaders/texture_draw_shaders.cpp  
-		render/opengl/shaders/lighting_shaders.cpp  
-		render/opengl/shaders/ground_plane_shaders.cpp  
-		render/opengl/shaders/histogram_shaders.cpp  
-		render/opengl/shaders/surface_mesh_shaders.cpp  
-		render/opengl/shaders/vector_shaders.cpp  
-		render/opengl/shaders/sphere_shaders.cpp  
-		render/opengl/shaders/ribbon_shaders.cpp  
-		render/opengl/shaders/cylinder_shaders.cpp  
+		render/opengl/gl_engine.cpp
+		render/opengl/shaders/texture_draw_shaders.cpp
+		render/opengl/shaders/lighting_shaders.cpp
+		render/opengl/shaders/ground_plane_shaders.cpp
+		render/opengl/shaders/histogram_shaders.cpp
+		render/opengl/shaders/surface_mesh_shaders.cpp
+		render/opengl/shaders/vector_shaders.cpp
+		render/opengl/shaders/sphere_shaders.cpp
+		render/opengl/shaders/ribbon_shaders.cpp
+		render/opengl/shaders/cylinder_shaders.cpp
 	)
 
   list(APPEND BACKEND_HEADERS
@@ -51,7 +51,7 @@ if("${POLYSCOPE_BACKEND_OPENGL3_GLFW}")
 	if(APPLE)
 			# Apple is playing hardball and deprecating openGL... we'll cross that bridge when we come to it
 			# Silence warnings about openGL deprecation
-			add_definitions(-DGL_SILENCE_DEPRECATION)  
+			add_definitions(-DGL_SILENCE_DEPRECATION)
 
 			find_library(cocoa_library Cocoa)
 			find_library(opengl_library OpenGL)
@@ -61,24 +61,24 @@ if("${POLYSCOPE_BACKEND_OPENGL3_GLFW}")
 	else()
 			list(APPEND BACKEND_LIBS glad)
 	endif()
-			
-  add_definitions(-DPOLYSCOPE_BACKEND_OPENGL3_GLFW_ENABLED)  
+
+  add_definitions(-DPOLYSCOPE_BACKEND_OPENGL3_GLFW_ENABLED)
 endif()
-	
+
 if("${POLYSCOPE_BACKEND_OPENGL_MOCK}")
   message("Polyscope backend openGL_mock enabled")
-	
+
   list (APPEND BACKEND_SRCS
-		render/mock_opengl/mock_gl_engine.cpp  
-		render/opengl/shaders/texture_draw_shaders.cpp  
-		render/opengl/shaders/lighting_shaders.cpp  
-		render/opengl/shaders/ground_plane_shaders.cpp  
-		render/opengl/shaders/histogram_shaders.cpp  
-		render/opengl/shaders/surface_mesh_shaders.cpp  
-		render/opengl/shaders/vector_shaders.cpp  
-		render/opengl/shaders/sphere_shaders.cpp  
-		render/opengl/shaders/ribbon_shaders.cpp  
-		render/opengl/shaders/cylinder_shaders.cpp  
+		render/mock_opengl/mock_gl_engine.cpp
+		render/opengl/shaders/texture_draw_shaders.cpp
+		render/opengl/shaders/lighting_shaders.cpp
+		render/opengl/shaders/ground_plane_shaders.cpp
+		render/opengl/shaders/histogram_shaders.cpp
+		render/opengl/shaders/surface_mesh_shaders.cpp
+		render/opengl/shaders/vector_shaders.cpp
+		render/opengl/shaders/sphere_shaders.cpp
+		render/opengl/shaders/ribbon_shaders.cpp
+		render/opengl/shaders/cylinder_shaders.cpp
 	)
 
   list(APPEND BACKEND_HEADERS
@@ -93,13 +93,13 @@ if("${POLYSCOPE_BACKEND_OPENGL_MOCK}")
   list(APPEND BACKEND_LIBS
 	)
 
-add_definitions(-DPOLYSCOPE_BACKEND_OPENGL_MOCK_ENABLED)  
+add_definitions(-DPOLYSCOPE_BACKEND_OPENGL_MOCK_ENABLED)
 endif()
 
 
 SET(SRCS
-  
-  # Core functionality 
+
+  # Core functionality
   polyscope.cpp
 	screenshot.cpp
   structure.cpp
@@ -107,13 +107,13 @@ SET(SRCS
   view.cpp
   messages.cpp
   pick.cpp
-  
+
 	# Rendering stuff
-  render/engine.cpp  
+  render/engine.cpp
   render/color_maps.cpp
   render/ground_plane.cpp
   render/materials.cpp
-  render/initialize_backend.cpp  
+  render/initialize_backend.cpp
 
   # General utilities
   disjoint_sets.cpp
@@ -144,18 +144,18 @@ SET(SRCS
   #surface_subset_quantity.cpp
   #surface_selection_quantity.cpp
   #surface_input_curve_quantity.cpp
-  
+
   # Curve network
 	curve_network.cpp
 	curve_network_scalar_quantity.cpp
 	curve_network_color_quantity.cpp
 	curve_network_vector_quantity.cpp
-  
+
   # Rendering utilities
 	trace_vector_field.cpp
 	ribbon_artist.cpp
-	
-	## Embedded binary data 
+
+	## Embedded binary data
   render/bindata/bindata_font_cousine_regular.cpp
   render/bindata/concrete_seamless.cpp
   render/bindata/bindata_clay.cpp
@@ -166,6 +166,7 @@ SET(SRCS
   render/bindata/bindata_ceramic.cpp
   render/bindata/bindata_jade.cpp
   render/bindata/bindata_normal.cpp
+  render/bindata/bindata_colorchecker.cpp
 )
 
 
@@ -251,6 +252,6 @@ target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps
 target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/json/include")
 target_include_directories(polyscope PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/../deps/stb")
 target_include_directories(polyscope PUBLIC "${BACKEND_INCLUDE_DIRS}")
-        
+
 # Link settings
 target_link_libraries(polyscope "${BACKEND_LIBS}" imgui stb)
