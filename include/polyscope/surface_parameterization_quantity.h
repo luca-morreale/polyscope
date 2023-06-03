@@ -29,6 +29,8 @@ public:
   virtual void refresh() override;
   virtual void buildCustomUI() override;
 
+  std::vector<glm::vec2>& getCoords();
+
 
 protected:
   std::shared_ptr<render::ShaderProgram> program;

@@ -45,7 +45,7 @@ edgeIsReal(             uniquePrefix() + "edgeIsReal",          edgeIsRealData),
 
 // other internally-computed geometry
 faceNormals(            uniquePrefix() + "faceNormals",         faceNormalsData,        std::bind(&SurfaceMesh::computeFaceNormals, this)),
-faceCenters(            uniquePrefix() + "faceCenters",         faceCentersData,        std::bind(&SurfaceMesh::computeFaceCenters, this)),         
+faceCenters(            uniquePrefix() + "faceCenters",         faceCentersData,        std::bind(&SurfaceMesh::computeFaceCenters, this)),
 faceAreas(              uniquePrefix() + "faceAreas",           faceAreasData,          std::bind(&SurfaceMesh::computeFaceAreas, this)),
 vertexNormals(          uniquePrefix() + "vertexNormals",       vertexNormalsData,      std::bind(&SurfaceMesh::computeVertexNormals, this)),
 vertexAreas(            uniquePrefix() + "vertexAreas",         vertexAreasData,        std::bind(&SurfaceMesh::computeVertexAreas, this)),
@@ -769,7 +769,7 @@ void SurfaceMesh::drawPick() {
 void SurfaceMesh::prepare() {
   // clang-format off
   program = render::engine->requestShader(
-      "MESH", 
+      "MESH",
       addSurfaceMeshRules({"SHADE_BASECOLOR"})
   );
   // clang-format on
@@ -916,9 +916,9 @@ void SurfaceMesh::setMeshPickAttributes(render::ShaderProgram& p) {
             (edgesHaveBeenUsed && !halfedgesHaveBeenUsed) ? edgeGlobalPickIndStart : halfedgeGlobalPickIndStart;
 
         // clang-format off
-        std::array<glm::vec3, 3> eColor = { 
-          fColor, 
-          pick::indToVec(eDataVec[9*iFTri + 1] + offset), 
+        std::array<glm::vec3, 3> eColor = {
+          fColor,
+          pick::indToVec(eDataVec[9*iFTri + 1] + offset),
           fColor
         };
         // clang-format on
@@ -934,10 +934,10 @@ void SurfaceMesh::setMeshPickAttributes(render::ShaderProgram& p) {
 
       if (cornersHaveBeenUsed) {
         // clang-format off
-        std::array<glm::vec3, 3> cColor = { 
-          pick::indToVec(triangleCornerInds.data[3*iFTri + 0] + cornerGlobalPickIndStart), 
-          pick::indToVec(triangleCornerInds.data[3*iFTri + 1] + cornerGlobalPickIndStart), 
-          pick::indToVec(triangleCornerInds.data[3*iFTri + 2] + cornerGlobalPickIndStart), 
+        std::array<glm::vec3, 3> cColor = {
+          pick::indToVec(triangleCornerInds.data[3*iFTri + 0] + cornerGlobalPickIndStart),
+          pick::indToVec(triangleCornerInds.data[3*iFTri + 1] + cornerGlobalPickIndStart),
+          pick::indToVec(triangleCornerInds.data[3*iFTri + 2] + cornerGlobalPickIndStart),
         };
         // clang-format on
         for (int j = 0; j < 3; j++) cornerColors.push_back(cColor);
@@ -1546,6 +1546,16 @@ SurfaceMesh::addLocalParameterizationQuantityImpl(std::string name, const std::v
 
   return q;
 }
+
+SurfaceTextureQuantity*
+SurfaceMesh::addSurfaceTextureQuantityImpl(std::string name, const std::vector<glm::vec2>& uvs, const Texture& texture) {
+  SurfaceTextureQuantity* q = new SurfaceTextureQuantity(
+      name, uvs, texture, *this);
+  addQuantity(q);
+
+  return q;
+}
+
 
 SurfaceVertexScalarQuantity* SurfaceMesh::addVertexScalarQuantityImpl(std::string name, const std::vector<double>& data,
                                                                       DataType type) {

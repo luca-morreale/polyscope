@@ -34,5 +34,11 @@ enum class ParamVizStyle { CHECKER = 0, GRID, LOCAL_CHECK, LOCAL_RAD }; // TODO 
 // MAGNITUDE: [0, inf], zero is special (ie, length of a vector)
 enum class DataType { STANDARD = 0, SYMMETRIC, MAGNITUDE };
 
+struct Texture {
+  unsigned char* data;
+  int width;
+  int height;
+};
+
 
 }; // namespace polyscope

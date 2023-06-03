@@ -1371,6 +1371,16 @@ void GLShaderProgram::setTextureFromBuffer(std::string name, TextureBuffer* text
   throw std::invalid_argument("No texture with name " + name);
 }
 
+void GLShaderProgram::copyTextures(std::shared_ptr<ShaderProgram> other){
+  GLShaderProgram* otherShaderProgram = dynamic_cast<GLShaderProgram*>(other.get());
+
+  if (!otherShaderProgram) {
+    throw std::invalid_argument("Invalid shader program!");
+  }
+
+  textures = otherShaderProgram->textures;
+}
+
 void GLShaderProgram::setTextureFromColormap(std::string name, const std::string& colormapName, bool allowUpdate) {
   const ValueColorMap& colormap = render::engine->getColorMap(colormapName);
 
@@ -1908,12 +1918,12 @@ void MockGLEngine::populateDefaultShadersAndRules() {
   registerShaderRule("DOWNSAMPLE_RESOLVE_2", DOWNSAMPLE_RESOLVE_2);
   registerShaderRule("DOWNSAMPLE_RESOLVE_3", DOWNSAMPLE_RESOLVE_3);
   registerShaderRule("DOWNSAMPLE_RESOLVE_4", DOWNSAMPLE_RESOLVE_4);
-  
+
   registerShaderRule("TRANSPARENCY_STRUCTURE", TRANSPARENCY_STRUCTURE);
   registerShaderRule("TRANSPARENCY_RESOLVE_SIMPLE", TRANSPARENCY_RESOLVE_SIMPLE);
   registerShaderRule("TRANSPARENCY_PEEL_STRUCTURE", TRANSPARENCY_PEEL_STRUCTURE);
   registerShaderRule("TRANSPARENCY_PEEL_GROUND", TRANSPARENCY_PEEL_GROUND);
-  
+
   registerShaderRule("GENERATE_VIEW_POS", GENERATE_VIEW_POS);
   registerShaderRule("CULL_POS_FROM_VIEW", CULL_POS_FROM_VIEW);
 
@@ -1929,7 +1939,8 @@ void MockGLEngine::populateDefaultShadersAndRules() {
   registerShaderRule("SHADEVALUE_MAG_VALUE2", SHADEVALUE_MAG_VALUE2);
   registerShaderRule("ISOLINE_STRIPE_VALUECOLOR", ISOLINE_STRIPE_VALUECOLOR);
   registerShaderRule("CHECKER_VALUE2COLOR", CHECKER_VALUE2COLOR);
- 
+  registerShaderRule("SHADE_TEXTURE2COLOR", SHADE_TEXTURE2COLOR);
+
   // Texture and image things
   registerShaderRule("TEXTURE_ORIGIN_UPPERLEFT", TEXTURE_ORIGIN_UPPERLEFT);
   registerShaderRule("TEXTURE_ORIGIN_LOWERLEFT", TEXTURE_ORIGIN_LOWERLEFT);

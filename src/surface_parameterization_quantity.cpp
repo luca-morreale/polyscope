@@ -71,6 +71,8 @@ void SurfaceParameterizationQuantity::refresh() {
   Quantity::refresh();
 }
 
+std::vector<glm::vec2>& SurfaceParameterizationQuantity::getCoords() { return coordsData; }
+
 // ==============================================================
 // ===============  Corner Parameterization  ====================
 // ==============================================================

@@ -247,6 +247,12 @@ SurfaceVertexParameterizationQuantity* SurfaceMesh::addLocalParameterizationQuan
 }
 
 template <class T>
+SurfaceTextureQuantity* SurfaceMesh::addTextureQuantity(std::string name, const T& uvs, const Texture& texture) {
+  validateSize(uvs, vertexDataSize, "texture quantity " + name);
+  return addSurfaceTextureQuantityImpl(name, standardizeVectorArray<glm::vec2, 2>(uvs), texture);
+}
+
+template <class T>
 SurfaceVertexScalarQuantity* SurfaceMesh::addVertexScalarQuantity(std::string name, const T& data, DataType type) {
   validateSize(data, vertexDataSize, "vertex scalar quantity " + name);
   return addVertexScalarQuantityImpl(name, standardizeArray<double, T>(data), type);

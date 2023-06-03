@@ -334,7 +334,7 @@ public:
   virtual bool hasAttribute(std::string name) = 0;
   virtual bool attributeIsSet(std::string name) = 0;
   virtual std::shared_ptr<AttributeBuffer> getAttributeBuffer(std::string name) = 0;
-  virtual void setAttribute(std::string name, std::shared_ptr<AttributeBuffer> externalBuffer) = 0; 
+  virtual void setAttribute(std::string name, std::shared_ptr<AttributeBuffer> externalBuffer) = 0;
   virtual void setAttribute(std::string name, const std::vector<glm::vec2>& data) = 0;
   virtual void setAttribute(std::string name, const std::vector<glm::vec3>& data) = 0;
   virtual void setAttribute(std::string name, const std::vector<glm::vec4>& data) = 0;
@@ -358,6 +358,7 @@ public:
                             bool withAlpha = true, bool useMipMap = false, bool repeat = false) = 0;
   virtual void setTextureFromColormap(std::string name, const std::string& colorMap, bool allowUpdate = false) = 0;
   virtual void setTextureFromBuffer(std::string name, TextureBuffer* textureBuffer) = 0;
+  virtual void copyTextures(std::shared_ptr<ShaderProgram> other) = 0;
 
 
   // Indices
